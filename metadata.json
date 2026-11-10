@@ -1,0 +1,6 @@
+{
+  "name": "MiroER - Diagramas Entidad-Relación",
+  "description": "Pizarra interactiva colaborativa estilo Miró para diseñar, conectar y exportar diagramas Entidad-Relación y esquemas SQL.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
