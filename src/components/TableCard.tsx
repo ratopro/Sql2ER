@@ -14,7 +14,7 @@ import {
   Database
 } from 'lucide-react';
 import { TableNode, Column, TableThemeColor, OnDeleteAction, DatabaseItem } from '../types/erd';
-import { TABLE_WIDTH, HEADER_HEIGHT, ROW_HEIGHT, FOOTER_HEIGHT } from '../utils/canvasMath';
+import { TABLE_WIDTH, HEADER_HEIGHT, ROW_HEIGHT, FOOTER_HEIGHT, COL_HEADER_HEIGHT } from '../utils/canvasMath';
 
 interface TableCardProps {
   table: TableNode;
@@ -38,6 +38,7 @@ const COMMON_SQL_TYPES = [
   'BIGINT',
   'TEXT',
   'BOOLEAN',
+  'DATETIME',
   'TIMESTAMP',
   'DATE',
   'DECIMAL',
@@ -224,7 +225,7 @@ export const TableCard: React.FC<TableCardProps> = ({
                 <Database className="w-3.5 h-3.5" />
               </button>
               {showDbPicker && (
-                <div className="absolute right-0 top-full mt-1.5 p-1 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[150px] z-50">
+                <div data-dropdown="true" className="absolute right-0 top-full mt-1.5 p-1 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[150px] z-50">
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block px-2 py-1">
                     Mover a Base de Datos:
                   </span>
@@ -262,7 +263,7 @@ export const TableCard: React.FC<TableCardProps> = ({
               <Palette className="w-3.5 h-3.5" />
             </button>
             {showColorPicker && (
-              <div className="absolute right-0 top-full mt-1.5 p-1.5 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 grid grid-cols-4 gap-1.5 z-50">
+              <div data-dropdown="true" className="absolute right-0 top-full mt-1.5 p-1.5 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 grid grid-cols-4 gap-1.5 z-50">
                 {THEME_COLORS.map(c => (
                   <button
                     key={c.id}
@@ -317,6 +318,42 @@ export const TableCard: React.FC<TableCardProps> = ({
         </div>
       </div>
 
+      {/* Table Column Headers (PK/FK, Nombre campo, Tipo, Tamaño, Opciones, Borrar) */}
+      <div 
+        style={{ height: Math.round(COL_HEADER_HEIGHT * fontScale) }}
+        className="px-2.5 bg-slate-100/90 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700/80 grid grid-cols-[28px_1fr_78px_60px_60px_24px] gap-2 items-center text-[9px] font-mono font-bold text-slate-500 dark:text-slate-400 select-none uppercase tracking-wider"
+      >
+        {/* 1. PK / FK */}
+        <div className="w-[28px] text-center" title="Clave Primaria (PK) y Clave Foránea (FK)">
+          PK/FK
+        </div>
+
+        {/* 2. Nombre campo */}
+        <div className="min-w-0 px-1 text-left truncate" title="Nombre del campo">
+          Campo
+        </div>
+
+        {/* 3. Tipo */}
+        <div className="w-[78px] text-left px-1 truncate" title="Tipo de dato SQL">
+          Tipo
+        </div>
+
+        {/* 4. Tamaño */}
+        <div className="w-[60px] text-center truncate" title="Longitud o precisión">
+          Tamaño
+        </div>
+
+        {/* 5. Opciones */}
+        <div className="w-[60px] text-center truncate" title="Opciones y modificadores">
+          Opciones
+        </div>
+
+        {/* 6. Borrar */}
+        <div className="w-[24px] text-center flex items-center justify-center" title="Eliminar campo">
+          <Trash2 className="w-2.5 h-2.5 opacity-60" />
+        </div>
+      </div>
+
       {/* Columns List */}
       <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
         {table.columns.map(col => {
@@ -324,13 +361,8 @@ export const TableCard: React.FC<TableCardProps> = ({
           const isFK = col.isFK;
           const isModifiersOpen = activeModifiersColId === col.id;
 
-          // Compute compact tags to display
+          // Compute compact tags to display on the right (excluding PK and FK, which are shown on the left as icons)
           const activeTags: string[] = [];
-          if (col.isPK) activeTags.push('PK');
-          if (col.isFK) {
-            const delSuffix = col.onDelete === 'SET NULL' ? ':NULL' : col.onDelete === 'RESTRICT' ? ':REST' : col.onDelete === 'CASCADE' ? ':CAS' : '';
-            activeTags.push(`FK${delSuffix}`);
-          }
           if (col.isAutoIncrement) activeTags.push('AI');
           if (!col.isNullable) activeTags.push('NN');
           else activeTags.push('NULL');
@@ -341,7 +373,7 @@ export const TableCard: React.FC<TableCardProps> = ({
             <div
               key={col.id}
               style={{ height: Math.round(ROW_HEIGHT * fontScale) }}
-              className="relative px-2.5 py-1.5 flex items-center justify-between text-xs group/row hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors gap-1.5"
+              className="relative px-2.5 grid grid-cols-[28px_1fr_78px_60px_60px_24px] gap-2 items-center text-xs group/row hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
             >
               {/* Left Column Port / Drag handle for connections */}
               <button
@@ -363,35 +395,52 @@ export const TableCard: React.FC<TableCardProps> = ({
                 <div className="w-1.5 h-1.5 rounded-full bg-white" />
               </button>
 
-              {/* Column Name Input */}
-              <div className="flex items-center gap-1 flex-1 min-w-[70px]">
-                {isPK && <Key className="w-3 h-3 text-amber-500 shrink-0" />}
-                {isFK && <LinkIcon className="w-3 h-3 text-cyan-500 shrink-0" />}
+              {/* 1. PK/FK Column */}
+              <div className="w-[28px] flex items-center justify-center gap-0.5">
+                {isPK && (
+                  <span title="Clave Primaria (PK)" className="shrink-0 flex items-center">
+                    <Key className="w-3 h-3 text-amber-500" />
+                  </span>
+                )}
+                {isFK && (
+                  <span title={`Clave Foránea (FK)${col.onDelete ? ` - ON DELETE ${col.onDelete}` : ''}`} className="shrink-0 flex items-center">
+                    <LinkIcon className="w-3 h-3 text-cyan-500" />
+                  </span>
+                )}
+                {!isPK && !isFK && (
+                  <span className="w-3 h-3 block opacity-0" />
+                )}
+              </div>
+
+              {/* 2. Column Name Input */}
+              <div className="min-w-0 flex items-center">
                 <input
                   type="text"
                   value={col.name}
                   onChange={e => handleUpdateColumn(col.id, { name: e.target.value.toLowerCase().replace(/\s+/g, '_') })}
                   onClick={e => e.stopPropagation()}
-                  className="w-full bg-transparent font-medium text-slate-800 dark:text-slate-200 outline-none hover:bg-slate-100 dark:hover:bg-slate-800 px-1 py-0.5 rounded transition-colors text-[11px]"
+                  placeholder="nombre_campo"
+                  className="w-full bg-transparent font-medium text-slate-800 dark:text-slate-200 outline-none hover:bg-slate-100 dark:hover:bg-slate-800 px-1.5 py-0.5 rounded transition-colors text-[11px] truncate"
                 />
               </div>
 
-              {/* Data Type Dropdown (clean: no uuid, no bigserial, varchar without size, no jsonf) */}
-              <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
+              {/* 3. Data Type Dropdown */}
+              <div className="w-[78px] relative" onClick={e => e.stopPropagation()}>
                 <button
                   onClick={() => {
                     setActiveModifiersColId(null);
                     setActiveTypeDropdownColId(activeTypeDropdownColId === col.id ? null : col.id);
                   }}
-                  className="font-mono text-[11px] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white px-1.5 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-0.5 transition-colors border border-slate-200/60 dark:border-slate-700/60"
+                  className="w-full font-mono text-[10px] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white px-1.5 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between transition-colors border border-slate-200/70 dark:border-slate-700/70 bg-white/60 dark:bg-slate-800/60"
                 >
-                  <span className="font-semibold">{col.type}</span>
-                  <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+                  <span className="font-semibold truncate">{col.type}</span>
+                  <ChevronDown className="w-2.5 h-2.5 opacity-60 shrink-0 ml-0.5" />
                 </button>
 
                 {activeTypeDropdownColId === col.id && (
                   <div
                     ref={typeDropdownRef}
+                    data-dropdown="true"
                     className="absolute left-0 top-full mt-1 w-32 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-1 z-50 max-h-48 overflow-y-auto"
                   >
                     {COMMON_SQL_TYPES.map(t => (
@@ -418,73 +467,88 @@ export const TableCard: React.FC<TableCardProps> = ({
                 )}
               </div>
 
-              {/* Textbox para longitud o precisión total */}
-              <input
-                type="text"
-                value={col.length || ''}
-                onChange={e => handleUpdateColumn(col.id, { length: e.target.value })}
-                onClick={e => e.stopPropagation()}
-                placeholder={col.type === 'DECIMAL' ? 'Prec.' : 'Long.'}
-                title={col.type === 'DECIMAL' ? 'Precisión total de dígitos (ej. 10)' : 'Longitud o tamaño del campo (ej. 255)'}
-                className={`${col.type === 'DECIMAL' ? 'w-9' : 'w-11'} bg-slate-50 dark:bg-slate-800/80 font-mono text-[10px] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded px-1 py-0.5 text-center outline-none focus:border-amber-500 placeholder:text-slate-400 placeholder:text-[9px] shrink-0`}
-              />
+              {/* 4. Tamaño (Longitud / Precisión) */}
+              <div className="w-[60px] flex items-center justify-center gap-1">
+                {col.type === 'DECIMAL' ? (
+                  <>
+                    <input
+                      type="text"
+                      value={col.length || '10'}
+                      onChange={e => handleUpdateColumn(col.id, { length: e.target.value })}
+                      onClick={e => e.stopPropagation()}
+                      placeholder="10"
+                      title="Precisión total de dígitos (ej. 10)"
+                      className="w-[28px] bg-slate-50 dark:bg-slate-800/80 font-mono text-[10px] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded px-0.5 py-0.5 text-center outline-none focus:border-amber-500"
+                    />
+                    <input
+                      type="text"
+                      value={col.decimals !== undefined ? col.decimals : '2'}
+                      onChange={e => handleUpdateColumn(col.id, { decimals: e.target.value })}
+                      onClick={e => e.stopPropagation()}
+                      placeholder="2"
+                      title="Decimales (escala, ej. 2)"
+                      className="w-[28px] bg-amber-50/70 dark:bg-amber-950/40 font-mono text-[10px] font-bold text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700 rounded px-0.5 py-0.5 text-center outline-none focus:border-amber-500"
+                    />
+                  </>
+                ) : (
+                  <input
+                    type="text"
+                    value={col.length || ''}
+                    onChange={e => handleUpdateColumn(col.id, { length: e.target.value })}
+                    onClick={e => e.stopPropagation()}
+                    placeholder="Long."
+                    title="Longitud o tamaño del campo (ej. 255)"
+                    className="w-full bg-slate-50 dark:bg-slate-800/80 font-mono text-[10px] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded px-1 py-0.5 text-center outline-none focus:border-amber-500 placeholder:text-slate-400 placeholder:text-[9px]"
+                  />
+                )}
+              </div>
 
-              {/* Si es tipo DECIMAL: Textbox para número de decimales */}
-              {col.type === 'DECIMAL' && (
-                <input
-                  type="text"
-                  value={col.decimals !== undefined ? col.decimals : '2'}
-                  onChange={e => handleUpdateColumn(col.id, { decimals: e.target.value })}
-                  onClick={e => e.stopPropagation()}
-                  placeholder="Dec."
-                  title="Número de decimales (escala, ej. 2)"
-                  className="w-8 bg-amber-50/70 dark:bg-amber-950/40 font-mono text-[10px] font-bold text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700 rounded px-1 py-0.5 text-center outline-none focus:border-amber-500 placeholder:text-amber-400/70 placeholder:text-[9px] shrink-0"
-                />
-              )}
-
-              {/* Desplegable multi-selección de opciones (NULL, AUTOINCREMENT, DEFAULT, NOT NULL, PK, UQ, FK) */}
-              <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
+              {/* 5. Desplegable de opciones y restricciones */}
+              <div className="w-[60px] relative" onClick={e => e.stopPropagation()}>
                 <button
                   onClick={() => {
                     setActiveTypeDropdownColId(null);
                     setActiveModifiersColId(isModifiersOpen ? null : col.id);
                   }}
                   title="Configurar opciones y restricciones del campo (NULL, Auto Increment, Default, etc.)"
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border transition-all ${
+                  className={`w-full flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] font-mono border transition-all ${
                     isModifiersOpen
                       ? 'bg-amber-500 text-slate-950 border-amber-600 font-bold'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-500'
                   }`}
                 >
-                  <div className="flex items-center gap-0.5">
-                    {activeTags.slice(0, 3).map(tag => (
-                      <span
-                        key={tag}
-                        className={`text-[9px] px-1 py-0.2 rounded font-bold ${
-                          tag === 'PK'
-                            ? 'bg-amber-200 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200'
-                            : tag === 'AI'
-                            ? 'bg-emerald-200 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200'
-                            : tag === 'NN'
-                            ? 'bg-blue-100 dark:bg-blue-900/80 text-blue-900 dark:text-blue-200'
-                            : 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-300'
-                        }`}
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                    {activeTags.length > 3 && (
-                      <span className="text-[8px] opacity-75">+{activeTags.length - 3}</span>
+                  <div className="flex items-center gap-0.5 truncate">
+                    {activeTags.length === 0 ? (
+                      <span className="text-[9px] text-slate-400 dark:text-slate-500 font-sans">Opt</span>
+                    ) : (
+                      activeTags.slice(0, 2).map(tag => (
+                        <span
+                          key={tag}
+                          className={`text-[8.5px] px-0.5 py-0.2 rounded font-bold ${
+                            tag === 'AI'
+                              ? 'bg-emerald-200 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200'
+                              : tag === 'NN'
+                              ? 'bg-blue-100 dark:bg-blue-900/80 text-blue-900 dark:text-blue-200'
+                              : 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    )}
+                    {activeTags.length > 2 && (
+                      <span className="text-[8px] opacity-75">+{activeTags.length - 2}</span>
                     )}
                   </div>
-                  <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+                  <ChevronDown className="w-2.5 h-2.5 opacity-60 shrink-0 ml-0.5" />
                 </button>
 
                 {/* Modifiers Multi-select Popover */}
                 {isModifiersOpen && (
                   <div
                     ref={modifiersDropdownRef}
-                    className="absolute right-0 top-full mt-1.5 w-60 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2.5 z-50 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-100"
+                    data-dropdown="true"
+                    className="absolute right-0 top-full mt-1.5 w-60 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2.5 z-50 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-100 max-h-80 overflow-y-auto"
                   >
                     <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
                       <span className="font-bold text-[11px] text-slate-900 dark:text-slate-100 flex items-center gap-1">
@@ -629,8 +693,8 @@ export const TableCard: React.FC<TableCardProps> = ({
                               </span>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-1">
-                              {(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION'] as OnDeleteAction[]).map(action => {
+                            <div className="grid grid-cols-3 gap-1">
+                              {(['CASCADE', 'SET NULL', 'SET DEFAULT', 'RESTRICT', 'NO ACTION'] as OnDeleteAction[]).map(action => {
                                 const isCurrent = (col.onDelete || 'CASCADE') === action;
                                 return (
                                   <button
@@ -643,17 +707,41 @@ export const TableCard: React.FC<TableCardProps> = ({
                                           ? 'bg-rose-500 text-white font-bold border-rose-600 shadow-xs'
                                           : action === 'SET NULL'
                                           ? 'bg-blue-500 text-white font-bold border-blue-600 shadow-xs'
+                                          : action === 'SET DEFAULT'
+                                          ? 'bg-emerald-500 text-white font-bold border-emerald-600 shadow-xs'
                                           : action === 'RESTRICT'
                                           ? 'bg-amber-500 text-slate-950 font-bold border-amber-600 shadow-xs'
                                           : 'bg-slate-700 text-white font-bold border-slate-800 shadow-xs'
                                         : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-400'
                                     }`}
                                   >
-                                    {action === 'SET NULL' ? 'SET NULL' : action}
+                                    {action === 'SET NULL' ? 'NULL' : action === 'SET DEFAULT' ? 'DEFAULT' : action}
                                   </button>
                                 );
                               })}
                             </div>
+
+                            {/* Textbox para el valor DEFAULT de la regla ON DELETE: visible únicamente al pulsar la opción DEFAULT */}
+                            {col.onDelete === 'SET DEFAULT' && (
+                              <div className="p-2 rounded-lg border bg-emerald-50/80 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 space-y-1 animate-in fade-in zoom-in-95 duration-100">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-[10px] font-bold text-emerald-900 dark:text-emerald-200">
+                                    Valor DEFAULT (SET DEFAULT):
+                                  </label>
+                                  <span className="text-[9px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                    ON DELETE SET DEFAULT
+                                  </span>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={col.defaultValue || ''}
+                                  onChange={e => handleUpdateColumn(col.id, { defaultValue: e.target.value })}
+                                  placeholder="ej. 0, 'sin_asignar', NULL"
+                                  autoFocus
+                                  className="w-full text-[10px] font-mono px-2 py-1 rounded bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 outline-none focus:border-emerald-500 text-slate-800 dark:text-slate-100"
+                                />
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -676,15 +764,17 @@ export const TableCard: React.FC<TableCardProps> = ({
                 )}
               </div>
 
-              {/* Delete Column button */}
-              <button
-                onClick={e => handleDeleteColumn(col.id, e)}
-                title="Eliminar campo"
-                disabled={table.columns.length <= 1}
-                className="p-1 text-slate-300 hover:text-rose-500 disabled:opacity-0 transition-colors shrink-0"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
+              {/* 6. Delete Column button */}
+              <div className="w-[24px] flex items-center justify-center">
+                <button
+                  onClick={e => handleDeleteColumn(col.id, e)}
+                  title="Eliminar campo"
+                  disabled={table.columns.length <= 1}
+                  className="p-1 text-slate-300 hover:text-rose-500 disabled:opacity-0 transition-colors rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 w-5 h-5 flex items-center justify-center"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
 
               {/* Right Column Port / Drag handle for connections */}
               <button

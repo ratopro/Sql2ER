@@ -291,7 +291,7 @@ export const TEMPLATES: { id: string; name: string; description: string; icon: s
       stickies: [
         {
           id: 's_welcome',
-          text: '✨ ¡Bienvenido a MiroER!\n\n• Pulsa "T" o haz clic en "+ Tabla" para crear una entidad.\n• Configura tipos (VARCHAR, INT, TEXT...), escribe su longitud y abre el menú de opciones para marcar NOT NULL, AUTO_INCREMENT, DEFAULT o PK.\n• Arrastra desde los conectores para enlazar claves foráneas.\n• Agrega pasos de evolución (ALTER TABLE) en la línea de tiempo.',
+          text: '✨ ¡Bienvenido a Relatia!\n\n• Pulsa "T" o haz clic en "+ Tabla" para crear una entidad.\n• Configura tipos (VARCHAR, INT, DATETIME...), escribe su longitud y abre el menú de opciones para marcar NOT NULL, AUTO_INCREMENT, DEFAULT o PK.\n• Arrastra desde los conectores para enlazar claves foráneas.\n• Agrega pasos de evolución (ALTER TABLE) en la línea de tiempo.',
           x: 350,
           y: 200,
           width: 340,

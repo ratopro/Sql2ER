@@ -392,7 +392,7 @@ export default function App() {
       savedAt: new Date().toISOString(),
     };
     try {
-      localStorage.setItem('miro_er_saved_project', JSON.stringify(projectData));
+      localStorage.setItem('relatia_saved_project', JSON.stringify(projectData));
       setHasUnsavedChanges(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
@@ -636,13 +636,18 @@ export default function App() {
         return;
       }
 
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName) || (e.target as HTMLElement)?.isContentEditable) {
         return;
       }
 
-      if (e.key === ' ' && !isSpacePressed) {
+      // Activar opción de movimiento (mano) únicamente mientras se mantenga presionada la tecla Espacio
+      if ((e.key === ' ' || e.code === 'Space') && !e.repeat) {
+        e.preventDefault();
         setIsSpacePressed(true);
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) {
           handleRedo();
@@ -682,16 +687,24 @@ export default function App() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === ' ') {
+      if (e.key === ' ' || e.code === 'Space') {
         setIsSpacePressed(false);
+        setIsPanning(false);
       }
+    };
+
+    const handleBlur = () => {
+      setIsSpacePressed(false);
+      setIsPanning(false);
     };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
     };
   }, [isSpacePressed, selectedElement, handleUndo, handleRedo, databases, handleIncreaseFontSize, handleDecreaseFontSize, handleResetFontSize]);
 
@@ -709,23 +722,86 @@ export default function App() {
     setSelectedElement(null);
   };
 
-  // Wheel zoom handler (centered at cursor)
+  // Prevenir scroll o zoom por defecto del navegador al usar la rueda sobre el lienzo
+  useEffect(() => {
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Si la rueda se usa dentro de un desplegable, menú o select con scroll,
+      // permitimos el scroll natural de la lista
+      const isInsideScrollable = !!target?.closest(
+        '[data-dropdown="true"], select, [role="listbox"], [role="menu"], [role="dialog"], .overflow-y-auto, .overflow-auto'
+      );
+      if (isInsideScrollable) {
+        return;
+      }
+
+      // Si hay un desplegable abierto en la pantalla, no hacer zoom ni scroll
+      const isDropdownOpen = !!document.querySelector('[data-dropdown="true"]');
+      if (isDropdownOpen) {
+        return;
+      }
+
+      e.preventDefault();
+    };
+
+    canvasEl.addEventListener('wheel', handleNativeWheel, { passive: false });
+    return () => {
+      canvasEl.removeEventListener('wheel', handleNativeWheel);
+    };
+  }, []);
+
+  // Wheel handler:
+  // - Rueda normal: Zoom centrado en la posición del puntero del ratón (desactivado si un select o menú está abierto)
+  // - Shift + rueda: Desplazamiento en vertical (arriba / abajo)
+  // - Ctrl + rueda: Desplazamiento en horizontal (derecha / izquierda)
   const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
     if (!canvasRef.current) return;
 
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const target = e.target as HTMLElement | null;
+    const isInsideScrollable = !!target?.closest(
+      '[data-dropdown="true"], select, [role="listbox"], [role="menu"], [role="dialog"], .overflow-y-auto, .overflow-auto'
+    );
+    const isDropdownOpen = !!document.querySelector('[data-dropdown="true"]');
 
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.2), 2.5);
+    // "Si se tiene abierto un select para seleccionar un tipo de datos u otra opción, la rueda del ratón no debe de hacer zoom"
+    if (isInsideScrollable || isDropdownOpen) {
+      return;
+    }
 
-    const newPanX = mouseX - (mouseX - pan.x) * (newZoom / zoom);
-    const newPanY = mouseY - (mouseY - pan.y) * (newZoom / zoom);
+    e.preventDefault();
 
-    setZoom(newZoom);
-    setPan({ x: newPanX, y: newPanY });
+    if (e.ctrlKey || e.metaKey) {
+      // Desplazamiento horizontal (derecha / izquierda) con Ctrl + rueda
+      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      setPan(prev => ({
+        x: prev.x - delta,
+        y: prev.y,
+      }));
+    } else if (e.shiftKey) {
+      // Desplazamiento vertical (arriba / abajo) con Shift + rueda
+      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      setPan(prev => ({
+        x: prev.x,
+        y: prev.y - delta,
+      }));
+    } else {
+      // Rueda normal del ratón: Zoom centrado en el puntero del ratón
+      const rect = canvasRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.2), 2.5);
+
+      const newPanX = mouseX - (mouseX - pan.x) * (newZoom / zoom);
+      const newPanY = mouseY - (mouseY - pan.y) * (newZoom / zoom);
+
+      setZoom(newZoom);
+      setPan({ x: newPanX, y: newPanY });
+    }
   };
 
   // Canvas Mouse Down
@@ -1215,7 +1291,7 @@ export default function App() {
 
       {/* Floating Left Toolbar */}
       <Toolbar
-        activeTool={activeTool}
+        activeTool={isSpacePressed ? 'pan' : activeTool}
         onSelectTool={handleSelectTool}
         onOpenSqlImport={() => setIsSqlImportOpen(true)}
         onOpenTemplates={handleOpenTemplates}
@@ -1263,9 +1339,9 @@ export default function App() {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
-        className={`w-full h-full canvas-dots relative overflow-hidden ${
+        className={`w-full h-full canvas-dots relative overflow-hidden select-none ${
           isPanning || isSpacePressed || activeTool === 'pan'
-            ? 'cursor-grab active:cursor-grabbing'
+            ? (isPanning ? 'cursor-grabbing' : 'cursor-grab')
             : activeTool === 'table'
             ? 'cursor-copy'
             : activeTool === 'sticky'
@@ -1286,12 +1362,20 @@ export default function App() {
             {frames.map(frame => (
               <div
                 key={frame.id}
-                onMouseDown={e => handleStartDragNode(frame.id, 'frame', e)}
+                onMouseDown={e => {
+                  if (isSpacePressed || activeTool === 'pan') {
+                    setIsPanning(true);
+                    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+                    return;
+                  }
+                  handleStartDragNode(frame.id, 'frame', e);
+                }}
               >
                 <FrameCard
                   frame={frame}
                   isSelected={selectedElement?.id === frame.id}
                   onSelect={e => {
+                    if (isSpacePressed || isPanning || activeTool === 'pan') return;
                     e.stopPropagation();
                     setSelectedElement({ id: frame.id, type: 'frame' });
                   }}
@@ -1315,6 +1399,7 @@ export default function App() {
                   toTable={toT}
                   isSelected={selectedElement?.id === rel.id}
                   onSelect={e => {
+                    if (isSpacePressed || isPanning || activeTool === 'pan') return;
                     e.stopPropagation();
                     setSelectedElement({ id: rel.id, type: 'relation' });
                   }}
@@ -1334,12 +1419,20 @@ export default function App() {
             {stickies.map(sticky => (
               <div
                 key={sticky.id}
-                onMouseDown={e => handleStartDragNode(sticky.id, 'sticky', e)}
+                onMouseDown={e => {
+                  if (isSpacePressed || activeTool === 'pan') {
+                    setIsPanning(true);
+                    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+                    return;
+                  }
+                  handleStartDragNode(sticky.id, 'sticky', e);
+                }}
               >
                 <StickyNote
                   sticky={sticky}
                   isSelected={selectedElement?.id === sticky.id}
                   onSelect={e => {
+                    if (isSpacePressed || isPanning || activeTool === 'pan') return;
                     e.stopPropagation();
                     setSelectedElement({ id: sticky.id, type: 'sticky' });
                   }}
@@ -1355,7 +1448,14 @@ export default function App() {
             {tables.map(table => (
               <div
                 key={table.id}
-                onMouseDown={e => handleStartDragNode(table.id, 'table', e)}
+                onMouseDown={e => {
+                  if (isSpacePressed || activeTool === 'pan') {
+                    setIsPanning(true);
+                    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+                    return;
+                  }
+                  handleStartDragNode(table.id, 'table', e);
+                }}
               >
                 <TableCard
                   table={table}
@@ -1363,6 +1463,7 @@ export default function App() {
                   fontScale={fontSizePercent / 100}
                   isSelected={selectedElement?.id === table.id}
                   onSelect={e => {
+                    if (isSpacePressed || isPanning || activeTool === 'pan') return;
                     e.stopPropagation();
                     setSelectedElement({ id: table.id, type: 'table' });
                   }}

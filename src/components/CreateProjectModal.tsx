@@ -120,7 +120,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <span>Crear Nuevo Proyecto</span>
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-semibold">
-                  MiroER
+                  Relatia
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">

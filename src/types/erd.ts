@@ -23,7 +23,7 @@ export interface Column {
   onDelete?: OnDeleteAction;
 }
 
-export type OnDeleteAction = 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+export type OnDeleteAction = 'CASCADE' | 'SET NULL' | 'SET DEFAULT' | 'RESTRICT' | 'NO ACTION';
 
 export interface DatabaseItem {
   id: string;

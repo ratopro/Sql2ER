@@ -1,15 +1,17 @@
 import { TableNode, Column } from '../types/erd';
 
-export const TABLE_WIDTH = 340;
+export const TABLE_WIDTH = 380;
 export const HEADER_HEIGHT = 44;
+export const COL_HEADER_HEIGHT = 22;
 export const ROW_HEIGHT = 36;
 export const FOOTER_HEIGHT = 36;
 
 export function getTableHeight(table: TableNode, scaleMultiplier: number = 1): number {
   const header = Math.round(HEADER_HEIGHT * scaleMultiplier);
+  const colHeader = Math.round(COL_HEADER_HEIGHT * scaleMultiplier);
   const row = Math.round(ROW_HEIGHT * scaleMultiplier);
   const footer = Math.round(FOOTER_HEIGHT * scaleMultiplier);
-  return header + table.columns.length * row + footer;
+  return header + colHeader + table.columns.length * row + footer;
 }
 
 export function getColumnYOffset(table: TableNode, columnId?: string, scaleMultiplier: number = 1): number {
@@ -17,8 +19,9 @@ export function getColumnYOffset(table: TableNode, columnId?: string, scaleMulti
   const index = table.columns.findIndex(c => c.id === columnId);
   if (index === -1) return getTableHeight(table, scaleMultiplier) / 2;
   const header = Math.round(HEADER_HEIGHT * scaleMultiplier);
+  const colHeader = Math.round(COL_HEADER_HEIGHT * scaleMultiplier);
   const row = Math.round(ROW_HEIGHT * scaleMultiplier);
-  return header + index * row + row / 2;
+  return header + colHeader + index * row + row / 2;
 }
 
 export interface Point {

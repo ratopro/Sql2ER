@@ -71,7 +71,8 @@ export const ConnectorLine: React.FC<ConnectorLineProps> = ({
     e.stopPropagation();
     const cycleMap: Record<OnDeleteAction, OnDeleteAction> = {
       'CASCADE': 'SET NULL',
-      'SET NULL': 'RESTRICT',
+      'SET NULL': 'SET DEFAULT',
+      'SET DEFAULT': 'RESTRICT',
       'RESTRICT': 'NO ACTION',
       'NO ACTION': 'CASCADE',
     };
@@ -191,7 +192,7 @@ export const ConnectorLine: React.FC<ConnectorLineProps> = ({
 
               {/* Direct ON DELETE Action Selector */}
               <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded shrink-0">
-                {(['CASCADE', 'SET NULL', 'RESTRICT'] as OnDeleteAction[]).map(act => {
+                {(['CASCADE', 'SET NULL', 'SET DEFAULT', 'RESTRICT', 'NO ACTION'] as OnDeleteAction[]).map(act => {
                   const isCurrent = (relationship.onDelete || 'CASCADE') === act;
                   return (
                     <button
@@ -207,11 +208,15 @@ export const ConnectorLine: React.FC<ConnectorLineProps> = ({
                             ? 'bg-rose-500 text-white shadow-xs'
                             : act === 'SET NULL'
                             ? 'bg-blue-500 text-white shadow-xs'
-                            : 'bg-amber-500 text-slate-950 shadow-xs'
+                            : act === 'SET DEFAULT'
+                            ? 'bg-emerald-500 text-white shadow-xs'
+                            : act === 'RESTRICT'
+                            ? 'bg-amber-500 text-slate-950 shadow-xs'
+                            : 'bg-slate-700 text-white shadow-xs'
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
-                      {act === 'SET NULL' ? 'NULL' : act === 'CASCADE' ? 'CASCADE' : 'RESTRICT'}
+                      {act === 'SET NULL' ? 'NULL' : act === 'SET DEFAULT' ? 'DEFAULT' : act}
                     </button>
                   );
                 })}

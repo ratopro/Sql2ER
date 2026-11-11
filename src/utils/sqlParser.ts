@@ -84,10 +84,11 @@ function splitSqlArguments(text: string): string[] {
  * Extracts ON DELETE action from a constraint string
  */
 function extractOnDelete(str: string): OnDeleteAction | undefined {
-  const match = str.match(/ON\s+DELETE\s+(CASCADE|SET\s+NULL|RESTRICT|NO\s+ACTION)/i);
+  const match = str.match(/ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|DEFAULT|RESTRICT|NO\s+ACTION)/i);
   if (!match) return undefined;
   const val = match[1].toUpperCase().replace(/\s+/g, ' ');
   if (val === 'SET NULL') return 'SET NULL';
+  if (val === 'SET DEFAULT' || val === 'DEFAULT') return 'SET DEFAULT';
   if (val === 'RESTRICT') return 'RESTRICT';
   if (val === 'NO ACTION') return 'NO ACTION';
   return 'CASCADE';

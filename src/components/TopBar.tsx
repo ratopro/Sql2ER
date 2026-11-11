@@ -240,7 +240,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           )}
 
           {showDbDropdown && (
-            <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-1.5 w-64 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 z-50 text-xs space-y-1.5 animate-in fade-in zoom-in-95 duration-100">
+            <div data-dropdown="true" className="absolute left-0 sm:left-auto sm:right-0 top-full mt-1.5 w-64 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 z-50 text-xs space-y-1.5 animate-in fade-in zoom-in-95 duration-100 max-h-80 overflow-y-auto">
               <div className="flex items-center justify-between px-2 py-1 border-b border-slate-100 dark:border-slate-800">
                 <span className="font-bold text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   Bases de Datos ({databases.length})
@@ -379,7 +379,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
 
           {showFontSizeMenu && (
-            <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-3 z-50 text-slate-800 dark:text-slate-200">
+            <div data-dropdown="true" className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-3 z-50 text-slate-800 dark:text-slate-200">
               <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
                 <div>
                   <span className="text-xs font-bold block">Tamaño de Texto</span>
