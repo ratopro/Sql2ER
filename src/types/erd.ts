@@ -53,8 +53,11 @@ export interface Relationship {
   toColumnId?: string;
   cardinality: Cardinality;
   onDelete?: OnDeleteAction;
+  defaultValue?: string;
   label?: string;
   routing?: 'curved' | 'orthogonal';
+  controlPoint1?: { x: number; y: number };
+  controlPoint2?: { x: number; y: number };
 }
 
 export interface StickyNode {
@@ -67,6 +70,8 @@ export interface StickyNode {
   color: StickyColor;
 }
 
+export type FrameBorderStyle = 'solid' | 'dashed' | 'dotted';
+
 export interface FrameNode {
   id: string;
   title: string;
@@ -75,6 +80,10 @@ export interface FrameNode {
   width: number;
   height: number;
   color?: string;
+  borderColor?: string;
+  bgColor?: string;
+  borderWidth?: number;
+  borderStyle?: FrameBorderStyle;
 }
 
 export type MigrationActionType = 

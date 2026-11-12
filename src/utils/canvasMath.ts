@@ -102,33 +102,77 @@ export function generateSmoothBezier(
   start: Point,
   end: Point,
   startSide: 'left' | 'right' | 'top' | 'bottom',
-  endSide: 'left' | 'right' | 'top' | 'bottom'
-): { path: string; mid: Point } {
+  endSide: 'left' | 'right' | 'top' | 'bottom',
+  customP1?: Point,
+  customP2?: Point
+): { path: string; mid: Point; p1: Point; p2: Point } {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const distance = Math.hypot(dx, dy);
   const curvature = Math.min(Math.max(distance * 0.4, 40), 160);
 
-  let cp1 = { ...start };
-  let cp2 = { ...end };
+  let defaultCp1 = { ...start };
+  let defaultCp2 = { ...end };
 
-  if (startSide === 'right') cp1.x += curvature;
-  if (startSide === 'left') cp1.x -= curvature;
-  if (startSide === 'bottom') cp1.y += curvature;
-  if (startSide === 'top') cp1.y -= curvature;
+  if (startSide === 'right') defaultCp1.x += curvature;
+  if (startSide === 'left') defaultCp1.x -= curvature;
+  if (startSide === 'bottom') defaultCp1.y += curvature;
+  if (startSide === 'top') defaultCp1.y -= curvature;
 
-  if (endSide === 'right') cp2.x += curvature;
-  if (endSide === 'left') cp2.x -= curvature;
-  if (endSide === 'bottom') cp2.y += curvature;
-  if (endSide === 'top') cp2.y -= curvature;
+  if (endSide === 'right') defaultCp2.x += curvature;
+  if (endSide === 'left') defaultCp2.x -= curvature;
+  if (endSide === 'bottom') defaultCp2.y += curvature;
+  if (endSide === 'top') defaultCp2.y -= curvature;
 
-  // Midpoint approximation on cubic bezier (t = 0.5)
-  const midX = 0.125 * start.x + 0.375 * cp1.x + 0.375 * cp2.x + 0.125 * end.x;
-  const midY = 0.125 * start.y + 0.375 * cp1.y + 0.375 * cp2.y + 0.125 * end.y;
+  // Compute final cubic Bezier control points (cp1, cp2) smoothly
+  let cp1 = { ...defaultCp1 };
+  let cp2 = { ...defaultCp2 };
+
+  if (customP1 && customP2) {
+    // Both handles customized: solve the 2x2 system so curve passes smoothly through customP1 at t=1/3 and customP2 at t=2/3
+    const R1x = 27 * customP1.x - 8 * start.x - end.x;
+    const R1y = 27 * customP1.y - 8 * start.y - end.y;
+    const R2x = 27 * customP2.x - start.x - 8 * end.x;
+    const R2y = 27 * customP2.y - start.y - 8 * end.y;
+
+    cp1 = {
+      x: Math.round((2 * R1x - R2x) / 18),
+      y: Math.round((2 * R1y - R2y) / 18),
+    };
+    cp2 = {
+      x: Math.round((2 * R2x - R1x) / 18),
+      y: Math.round((2 * R2y - R1y) / 18),
+    };
+  } else if (customP1) {
+    // Only handle 1 customized: curve passes through customP1 at t=1/3 with default cp2
+    cp1 = {
+      x: Math.round((27 * customP1.x - 8 * start.x - 6 * defaultCp2.x - end.x) / 12),
+      y: Math.round((27 * customP1.y - 8 * start.y - 6 * defaultCp2.y - end.y) / 12),
+    };
+  } else if (customP2) {
+    // Only handle 2 customized: curve passes through customP2 at t=2/3 with default cp1
+    cp2 = {
+      x: Math.round((27 * customP2.x - start.x - 6 * defaultCp1.x - 8 * end.x) / 12),
+      y: Math.round((27 * customP2.y - start.y - 6 * defaultCp1.y - 8 * end.y) / 12),
+    };
+  }
+
+  // Consistent cubic Bezier evaluator
+  const evalBezier = (t: number): Point => {
+    const t1 = 1 - t;
+    return {
+      x: Math.round(t1 * t1 * t1 * start.x + 3 * t1 * t1 * t * cp1.x + 3 * t1 * t * t * cp2.x + t * t * t * end.x),
+      y: Math.round(t1 * t1 * t1 * start.y + 3 * t1 * t1 * t * cp1.y + 3 * t1 * t * t * cp2.y + t * t * t * end.y),
+    };
+  };
+
+  const p1 = customP1 ? { ...customP1 } : evalBezier(0.33);
+  const p2 = customP2 ? { ...customP2 } : evalBezier(0.67);
+  const mid = evalBezier(0.5);
 
   const path = `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}`;
 
-  return { path, mid: { x: midX, y: midY } };
+  return { path, mid, p1, p2 };
 }
 
 export function computeFitToScreen(

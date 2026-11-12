@@ -86,8 +86,10 @@ export function generateSqlDDL(schema: ERDSchema, dialect: SqlDialect = 'postgre
         def += ' UNIQUE';
       }
 
-      if (col.defaultValue && col.defaultValue.trim()) {
-        def += ` DEFAULT ${col.defaultValue}`;
+      const relDefault = schema.relationships.find(r => r.fromTableId === table.id && r.fromColumnId === col.id)?.defaultValue;
+      const effectiveDefault = (col.defaultValue && col.defaultValue.trim()) || (relDefault && relDefault.trim());
+      if (effectiveDefault) {
+        def += ` DEFAULT ${effectiveDefault}`;
       }
 
       colDefs.push(def);

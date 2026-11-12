@@ -7,7 +7,6 @@ import {
   Share2, 
   Check, 
   Clock, 
-  LayoutTemplate, 
   Moon, 
   Sun, 
   Plus, 
@@ -18,7 +17,9 @@ import {
   AlertCircle,
   Type,
   Minus,
-  RotateCcw
+  RotateCcw,
+  Play,
+  Layers
 } from 'lucide-react';
 import { DatabaseItem } from '../types/erd';
 
@@ -31,7 +32,7 @@ interface TopBarProps {
   onRedo: () => void;
   onOpenExport: () => void;
   onOpenSqlImport: () => void;
-  onOpenTemplates: () => void;
+  onOpenTemplates?: () => void;
   isDark: boolean;
   onToggleTheme: () => void;
   tablesCount: number;
@@ -52,6 +53,9 @@ interface TopBarProps {
   onDecreaseFontSize: () => void;
   onResetFontSize: () => void;
   onSetFontSize: (pct: number) => void;
+  activeTab?: 'erd' | 'simulator';
+  onTabChange?: (tab: 'erd' | 'simulator') => void;
+  onRunSimulation?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -84,6 +88,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   onDecreaseFontSize,
   onResetFontSize,
   onSetFontSize,
+  activeTab = 'erd',
+  onTabChange,
+  onRunSimulation,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [tempTitle, setTempTitle] = useState(title);
@@ -213,7 +220,43 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
 
       {/* Zone 2: Databases Switcher & Navigation Tools */}
-      <nav className="flex items-center gap-1.5">
+      <nav className="flex items-center gap-1.5 sm:gap-2">
+        {/* Navigation Tabs: Diagrama ERD vs Simulación SQL */}
+        {onTabChange && (
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+            <button
+              onClick={() => onTabChange('erd')}
+              title="Ver el diagrama y lienzo visual ERD"
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
+                activeTab === 'erd'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-amber-500" />
+              <span className="hidden sm:inline">Diagrama ERD</span>
+            </button>
+            <button
+              onClick={() => {
+                if (activeTab !== 'simulator' && onRunSimulation) {
+                  onRunSimulation();
+                } else {
+                  onTabChange('simulator');
+                }
+              }}
+              title="Abrir la pestaña de simulación SQL y explorador de tablas (F5)"
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
+                activeTab === 'simulator'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+              }`}
+            >
+              <Play className="w-3.5 h-3.5 fill-current text-emerald-400" />
+              <span className="hidden sm:inline">Simulación SQL</span>
+            </button>
+          </div>
+        )}
+
         {/* Database Selector Dropdown */}
         <div className="relative" ref={dbDropdownRef}>
           {databases.length > 0 ? (
@@ -328,15 +371,6 @@ export const TopBar: React.FC<TopBarProps> = ({
         >
           <FileCode className="w-3.5 h-3.5 text-amber-500" />
           <span>Importar SQL</span>
-        </button>
-
-        {/* Templates button */}
-        <button
-          onClick={onOpenTemplates}
-          className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors"
-        >
-          <LayoutTemplate className="w-4 h-4 text-slate-500" />
-          <span>Plantillas</span>
         </button>
       </nav>
 
@@ -483,6 +517,21 @@ export const TopBar: React.FC<TopBarProps> = ({
           {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Share2 className="w-3.5 h-3.5" />}
           <span>{copiedLink ? 'Copiado' : 'Compartir'}</span>
         </button>
+
+        {/* Run Simulation CTA Button */}
+        {onRunSimulation && (
+          <button
+            onClick={onRunSimulation}
+            title="Ejecutar simulación de base de datos en memoria y abrir consola SQL (F5)"
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg shadow-sm transition-all active:scale-95"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span className="hidden sm:inline">Simular BD</span>
+            <kbd className="text-[10px] font-mono bg-emerald-700/60 px-1 py-0.2 rounded font-bold">
+              F5
+            </kbd>
+          </button>
+        )}
 
         {/* Export SQL Primary CTA */}
         <button

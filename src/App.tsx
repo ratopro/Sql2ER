@@ -18,6 +18,7 @@ import { TableCard } from './components/TableCard';
 import { ConnectorLine } from './components/ConnectorLine';
 import { StickyNote } from './components/StickyNote';
 import { FrameCard } from './components/FrameCard';
+import { ResizeHandle } from './components/ResizeHandles';
 import { ZoomBar } from './components/ZoomBar';
 import { Minimap } from './components/Minimap';
 import { TimelineBar } from './components/TimelineBar';
@@ -28,8 +29,9 @@ import { TemplatesModal } from './components/TemplatesModal';
 import { CreateDatabaseModal } from './components/CreateDatabaseModal';
 import { ConfirmNewProjectModal } from './components/ConfirmNewProjectModal';
 import { CreateProjectModal, CreateProjectFormData } from './components/CreateProjectModal';
+import { DatabaseSimulator } from './components/DatabaseSimulator';
 import { Type } from 'lucide-react';
-import { computeFitToScreen, generateSmoothBezier, getColumnYOffset, TABLE_WIDTH } from './utils/canvasMath';
+import { computeFitToScreen, generateSmoothBezier, getColumnYOffset, TABLE_WIDTH, getTableHeight } from './utils/canvasMath';
 
 // Helper to build initial evolution steps for the template
 function createInitialSteps(baseTables: TableNode[], baseRels: Relationship[]): SchemaStep[] {
@@ -155,6 +157,15 @@ export default function App() {
   const [isFirstDbPrompt, setIsFirstDbPrompt] = useState(false);
   const [isConfirmNewProjectOpen, setIsConfirmNewProjectOpen] = useState(false);
   
+  // Active navigation tab ('erd' diagram or 'simulator' SQL)
+  const [activeTab, setActiveTab] = useState<'erd' | 'simulator'>('erd');
+  const [simulationKey, setSimulationKey] = useState<number>(0);
+
+  const handleRunSimulation = useCallback(() => {
+    setSimulationKey(prev => prev + 1);
+    setActiveTab('simulator');
+  }, []);
+
   // Application text scale state (Ctrl + / Ctrl -)
   const [fontSizePercent, setFontSizePercent] = useState<number>(() => {
     try {
@@ -355,12 +366,30 @@ export default function App() {
     startY: number;
     elemStartX: number;
     elemStartY: number;
+    containedTables?: { id: string; startX: number; startY: number }[];
+    containedStickies?: { id: string; startX: number; startY: number }[];
+  } | null>(null);
+
+  // Resizing state for frames and stickies (border points)
+  const [resizingNode, setResizingNode] = useState<{
+    id: string;
+    type: 'frame' | 'sticky';
+    handle: ResizeHandle;
+    startX: number;
+    startY: number;
+    elemX: number;
+    elemY: number;
+    elemWidth: number;
+    elemHeight: number;
   } | null>(null);
 
   // Canvas Panning drag state
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  // Active Popup Tracker: ensures popups always render in front (z-100) and close when another object is clicked
+  const [activePopup, setActivePopup] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -636,6 +665,13 @@ export default function App() {
         return;
       }
 
+      // F5: Ejecutar simulación de base de datos
+      if (e.key === 'F5' || e.code === 'F5') {
+        e.preventDefault();
+        handleRunSimulation();
+        return;
+      }
+
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName) || (e.target as HTMLElement)?.isContentEditable) {
         return;
       }
@@ -680,6 +716,10 @@ export default function App() {
           handleDeleteSelected();
         }
       } else if (e.key === 'Escape') {
+        if (activeTab === 'simulator') {
+          setActiveTab('erd');
+          return;
+        }
         setConnectingSource(null);
         setSelectedElement(null);
         setActiveTool('select');
@@ -706,7 +746,7 @@ export default function App() {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [isSpacePressed, selectedElement, handleUndo, handleRedo, databases, handleIncreaseFontSize, handleDecreaseFontSize, handleResetFontSize]);
+  }, [isSpacePressed, selectedElement, handleUndo, handleRedo, databases, handleIncreaseFontSize, handleDecreaseFontSize, handleResetFontSize, activeTab, handleRunSimulation]);
 
   const handleDeleteSelected = () => {
     if (!selectedElement) return;
@@ -814,6 +854,12 @@ export default function App() {
 
     if (e.button !== 0) return;
 
+    // Guard: ignore clicks that originated on SVG elements, popups, or connection line handles
+    const target = e.target as HTMLElement | SVGElement | null;
+    if (target && (target.closest('svg') || target.closest('[data-popup]') || target.closest('[data-dropdown]'))) {
+      return;
+    }
+
     const world = screenToWorld(e.clientX, e.clientY);
 
     if (activeTool === 'table') {
@@ -872,6 +918,10 @@ export default function App() {
         y: Math.round(world.y),
         width: 500,
         height: 400,
+        borderColor: '#f59e0b',
+        bgColor: 'rgba(245, 158, 11, 0.08)',
+        borderWidth: 2,
+        borderStyle: 'dashed',
       };
       const updated = [...frames, newFrame];
       setFrames(updated);
@@ -885,7 +935,118 @@ export default function App() {
     if (connectingSource) {
       setConnectingSource(null);
     }
+    if (activePopup) {
+      setActivePopup(null);
+    }
+
+    // Clicking and dragging on empty canvas background moves the screen (canvas pan)
+    setIsPanning(true);
+    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
   };
+
+  // Global capture listener: closes any active popup when clicking on any other object or canvas area
+  useEffect(() => {
+    if (!activePopup) return;
+
+    const handleGlobalCaptureMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      // If clicked inside the currently active popup or dropdown, do not close
+      if (target.closest('[data-popup="true"]') || target.closest('[data-dropdown="true"]')) {
+        return;
+      }
+
+      // If clicked directly on the trigger button of this popup, leave toggle to the button handler
+      if (target.closest('[data-popup-trigger="true"]')) {
+        return;
+      }
+
+      // Otherwise: clicked on another table, sticky, frame, relation, canvas, etc. -> close popup!
+      setActivePopup(null);
+    };
+
+    window.addEventListener('mousedown', handleGlobalCaptureMouseDown, true);
+    return () => {
+      window.removeEventListener('mousedown', handleGlobalCaptureMouseDown, true);
+    };
+  }, [activePopup]);
+
+  // Global window listeners for completely smooth, uninterrupted panning and dragging
+  useEffect(() => {
+    if (!isPanning && !draggedNode) return;
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (isPanning) {
+        setPan({
+          x: e.clientX - panStart.x,
+          y: e.clientY - panStart.y,
+        });
+        return;
+      }
+
+      if (draggedNode) {
+        const dx = (e.clientX - draggedNode.startX) / zoom;
+        const dy = (e.clientY - draggedNode.startY) / zoom;
+
+        const newX = Math.round(draggedNode.elemStartX + dx);
+        const newY = Math.round(draggedNode.elemStartY + dy);
+
+        if (draggedNode.type === 'table') {
+          setTables(prev => prev.map(t => (t.id === draggedNode.id ? { ...t, x: newX, y: newY } : t)));
+        } else if (draggedNode.type === 'sticky') {
+          setStickies(prev => prev.map(s => (s.id === draggedNode.id ? { ...s, x: newX, y: newY } : s)));
+        } else if (draggedNode.type === 'frame') {
+          setFrames(prev => prev.map(f => (f.id === draggedNode.id ? { ...f, x: newX, y: newY } : f)));
+
+          // "Al mover un marco del módulo, si se tiene pulsada la tecla control, se moverá junto a los objetos que estén dentro de ella."
+          const isCtrlPressed = e.ctrlKey || e.metaKey;
+
+          if (draggedNode.containedTables && draggedNode.containedTables.length > 0) {
+            setTables(prev => prev.map(t => {
+              const match = draggedNode.containedTables?.find(ct => ct.id === t.id);
+              if (!match) return t;
+              if (isCtrlPressed) {
+                return { ...t, x: Math.round(match.startX + dx), y: Math.round(match.startY + dy) };
+              } else {
+                return { ...t, x: match.startX, y: match.startY };
+              }
+            }));
+          }
+
+          if (draggedNode.containedStickies && draggedNode.containedStickies.length > 0) {
+            setStickies(prev => prev.map(s => {
+              const match = draggedNode.containedStickies?.find(cs => cs.id === s.id);
+              if (!match) return s;
+              if (isCtrlPressed) {
+                return { ...s, x: Math.round(match.startX + dx), y: Math.round(match.startY + dy) };
+              } else {
+                return { ...s, x: match.startX, y: match.startY };
+              }
+            }));
+          }
+        }
+      }
+    };
+
+    const handleGlobalMouseUp = () => {
+      if (isPanning) {
+        setIsPanning(false);
+      }
+
+      if (draggedNode) {
+        saveHistory({ tables, relationships, stickies, frames, steps, title });
+        setDraggedNode(null);
+      }
+    };
+
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isPanning, panStart, draggedNode, zoom, tables, relationships, stickies, frames, steps, title]);
 
   // Canvas Mouse Move
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -913,6 +1074,33 @@ export default function App() {
         setStickies(prev => prev.map(s => (s.id === draggedNode.id ? { ...s, x: newX, y: newY } : s)));
       } else if (draggedNode.type === 'frame') {
         setFrames(prev => prev.map(f => (f.id === draggedNode.id ? { ...f, x: newX, y: newY } : f)));
+
+        // "Al mover un marco del módulo, si se tiene pulsada la tecla control, se moverá junto a los objetos que estén dentro de ella."
+        const isCtrlPressed = e.ctrlKey || e.metaKey;
+
+        if (draggedNode.containedTables && draggedNode.containedTables.length > 0) {
+          setTables(prev => prev.map(t => {
+            const match = draggedNode.containedTables?.find(ct => ct.id === t.id);
+            if (!match) return t;
+            if (isCtrlPressed) {
+              return { ...t, x: Math.round(match.startX + dx), y: Math.round(match.startY + dy) };
+            } else {
+              return { ...t, x: match.startX, y: match.startY };
+            }
+          }));
+        }
+
+        if (draggedNode.containedStickies && draggedNode.containedStickies.length > 0) {
+          setStickies(prev => prev.map(s => {
+            const match = draggedNode.containedStickies?.find(cs => cs.id === s.id);
+            if (!match) return s;
+            if (isCtrlPressed) {
+              return { ...s, x: Math.round(match.startX + dx), y: Math.round(match.startY + dy) };
+            } else {
+              return { ...s, x: match.startX, y: match.startY };
+            }
+          }));
+        }
       }
     }
   };
@@ -942,6 +1130,8 @@ export default function App() {
 
     let elemStartX = 0;
     let elemStartY = 0;
+    let containedTables: { id: string; startX: number; startY: number }[] = [];
+    let containedStickies: { id: string; startX: number; startY: number }[] = [];
 
     if (type === 'table') {
       const t = tables.find(item => item.id === id);
@@ -960,6 +1150,36 @@ export default function App() {
       if (f) {
         elemStartX = f.x;
         elemStartY = f.y;
+
+        // Bounding box of the frame
+        const fx1 = f.x;
+        const fy1 = f.y;
+        const fx2 = f.x + f.width;
+        const fy2 = f.y + f.height;
+
+        // Detect all tables that are inside or mostly inside the frame
+        containedTables = tables
+          .filter(t => {
+            const tw = t.width || TABLE_WIDTH;
+            const th = getTableHeight(t);
+            const cx = t.x + tw / 2;
+            const cy = t.y + th / 2;
+            const centerInside = cx >= fx1 && cx <= fx2 && cy >= fy1 && cy <= fy2;
+            const originInside = t.x >= fx1 - 10 && t.x <= fx2 && t.y >= fy1 - 10 && t.y <= fy2;
+            return centerInside || originInside;
+          })
+          .map(t => ({ id: t.id, startX: t.x, startY: t.y }));
+
+        // Detect all stickies that are inside the frame
+        containedStickies = stickies
+          .filter(s => {
+            const cx = s.x + s.width / 2;
+            const cy = s.y + s.height / 2;
+            const centerInside = cx >= fx1 && cx <= fx2 && cy >= fy1 && cy <= fy2;
+            const originInside = s.x >= fx1 - 10 && s.x <= fx2 && s.y >= fy1 - 10 && s.y <= fy2;
+            return centerInside || originInside;
+          })
+          .map(s => ({ id: s.id, startX: s.x, startY: s.y }));
       }
     }
 
@@ -970,8 +1190,111 @@ export default function App() {
       startY: e.clientY,
       elemStartX,
       elemStartY,
+      containedTables,
+      containedStickies,
     });
   };
+
+  // Start resizing a frame or sticky note from one of the 8 border handles
+  const handleStartResize = (
+    id: string,
+    type: 'frame' | 'sticky',
+    handle: ResizeHandle,
+    e: React.MouseEvent
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    if (type === 'frame') {
+      const f = frames.find(item => item.id === id);
+      if (!f) return;
+      setSelectedElement({ id, type: 'frame' });
+      setResizingNode({
+        id,
+        type: 'frame',
+        handle,
+        startX: e.clientX,
+        startY: e.clientY,
+        elemX: f.x,
+        elemY: f.y,
+        elemWidth: f.width,
+        elemHeight: f.height,
+      });
+    } else if (type === 'sticky') {
+      const s = stickies.find(item => item.id === id);
+      if (!s) return;
+      setSelectedElement({ id, type: 'sticky' });
+      setResizingNode({
+        id,
+        type: 'sticky',
+        handle,
+        startX: e.clientX,
+        startY: e.clientY,
+        elemX: s.x,
+        elemY: s.y,
+        elemWidth: s.width,
+        elemHeight: s.height,
+      });
+    }
+  };
+
+  // Window listeners for smooth, uninterrupted resizing across the screen
+  useEffect(() => {
+    if (!resizingNode) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const dx = (e.clientX - resizingNode.startX) / zoom;
+      const dy = (e.clientY - resizingNode.startY) / zoom;
+
+      const minW = resizingNode.type === 'frame' ? 140 : 100;
+      const minH = resizingNode.type === 'frame' ? 80 : 80;
+
+      let newX = resizingNode.elemX;
+      let newY = resizingNode.elemY;
+      let newW = resizingNode.elemWidth;
+      let newH = resizingNode.elemHeight;
+
+      // Horizontal resize calculation
+      if (resizingNode.handle.includes('e')) {
+        newW = Math.max(minW, Math.round(resizingNode.elemWidth + dx));
+      } else if (resizingNode.handle.includes('w')) {
+        const targetW = resizingNode.elemWidth - dx;
+        const clampedW = Math.max(minW, Math.round(targetW));
+        const deltaW = clampedW - resizingNode.elemWidth;
+        newX = Math.round(resizingNode.elemX - deltaW);
+        newW = clampedW;
+      }
+
+      // Vertical resize calculation
+      if (resizingNode.handle.includes('s')) {
+        newH = Math.max(minH, Math.round(resizingNode.elemHeight + dy));
+      } else if (resizingNode.handle.includes('n')) {
+        const targetH = resizingNode.elemHeight - dy;
+        const clampedH = Math.max(minH, Math.round(targetH));
+        const deltaH = clampedH - resizingNode.elemHeight;
+        newY = Math.round(resizingNode.elemY - deltaH);
+        newH = clampedH;
+      }
+
+      if (resizingNode.type === 'frame') {
+        setFrames(prev => prev.map(f => (f.id === resizingNode.id ? { ...f, x: newX, y: newY, width: newW, height: newH } : f)));
+      } else if (resizingNode.type === 'sticky') {
+        setStickies(prev => prev.map(s => (s.id === resizingNode.id ? { ...s, x: newX, y: newY, width: newW, height: newH } : s)));
+      }
+    };
+
+    const handleWindowMouseUp = () => {
+      saveHistory({ tables, relationships, stickies, frames, steps, title });
+      setResizingNode(null);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, [resizingNode, zoom, tables, relationships, stickies, frames, steps, title]);
 
   // Connection creation logic
   const handleStartConnection = (fromTableId: string, fromColumnId?: string, e?: React.MouseEvent) => {
@@ -1041,10 +1364,14 @@ export default function App() {
     setSelectedElement({ id: newId, type: 'table' });
   };
 
-  const handleUpdateRelation = (updatedRel: Relationship) => {
-    const updated = relationships.map(r => (r.id === updatedRel.id ? updatedRel : r));
-    setRelationships(updated);
-    saveHistory({ tables, relationships: updated, stickies, frames, steps, title });
+  const handleUpdateRelation = (updatedRel: Relationship, saveToHistory: boolean = true) => {
+    setRelationships(prev => {
+      const updated = prev.map(r => (r.id === updatedRel.id ? updatedRel : r));
+      if (saveToHistory) {
+        saveHistory({ tables, relationships: updated, stickies, frames, steps, title });
+      }
+      return updated;
+    });
   };
 
   const handleDeleteRelation = (id: string) => {
@@ -1287,7 +1614,21 @@ export default function App() {
         onDecreaseFontSize={handleDecreaseFontSize}
         onResetFontSize={handleResetFontSize}
         onSetFontSize={handleSetFontSize}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRunSimulation={handleRunSimulation}
       />
+
+      {/* Database Simulation Tab (In-Memory SQL Console & Created Tables Explorer) */}
+      {activeTab === 'simulator' && (
+        <DatabaseSimulator
+          key={simulationKey}
+          schema={currentSchema}
+          onBackToDiagram={() => setActiveTab('erd')}
+          onReRunSimulation={handleRunSimulation}
+          isDark={isDark}
+        />
+      )}
 
       {/* Floating Left Toolbar */}
       <Toolbar
@@ -1340,7 +1681,15 @@ export default function App() {
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
         className={`w-full h-full canvas-dots relative overflow-hidden select-none ${
-          isPanning || isSpacePressed || activeTool === 'pan'
+          resizingNode
+            ? (resizingNode.handle === 'nw' || resizingNode.handle === 'se'
+                ? 'cursor-nwse-resize'
+                : resizingNode.handle === 'ne' || resizingNode.handle === 'sw'
+                ? 'cursor-nesw-resize'
+                : resizingNode.handle === 'n' || resizingNode.handle === 's'
+                ? 'cursor-ns-resize'
+                : 'cursor-ew-resize')
+            : isPanning || isSpacePressed || activeTool === 'pan'
             ? (isPanning ? 'cursor-grabbing' : 'cursor-grab')
             : activeTool === 'table'
             ? 'cursor-copy'
@@ -1357,129 +1706,221 @@ export default function App() {
           }}
           className="absolute left-0 top-0 w-0 h-0 pointer-events-none"
         >
-          {/* Layer 1: Frames (Grouping boundaries) */}
+          {/* Layer 1: Frames (Grouping boundaries - elevated to z-[100] when style menu is open) */}
           <div className="relative pointer-events-auto">
-            {frames.map(frame => (
-              <div
-                key={frame.id}
-                onMouseDown={e => {
-                  if (isSpacePressed || activeTool === 'pan') {
-                    setIsPanning(true);
-                    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-                    return;
-                  }
-                  handleStartDragNode(frame.id, 'frame', e);
-                }}
-              >
-                <FrameCard
-                  frame={frame}
-                  isSelected={selectedElement?.id === frame.id}
-                  onSelect={e => {
-                    if (isSpacePressed || isPanning || activeTool === 'pan') return;
-                    e.stopPropagation();
-                    setSelectedElement({ id: frame.id, type: 'frame' });
-                  }}
-                  onUpdate={handleUpdateFrame}
-                  onDelete={handleDeleteFrame}
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* Layer 2: SVG Relationships & Connectors */}
-          <svg className="absolute left-0 top-0 overflow-visible w-[1px] h-[1px] pointer-events-auto z-10">
-            {relationships.map(rel => {
-              const fromT = tables.find(t => t.id === rel.fromTableId);
-              const toT = tables.find(t => t.id === rel.toTableId);
+            {frames.map(frame => {
+              const isSelected = selectedElement?.id === frame.id;
+              const isStyleMenuOpen = activePopup === 'frame_style_' + frame.id;
               return (
-                <ConnectorLine
-                  key={rel.id}
-                  relationship={rel}
-                  fromTable={fromT}
-                  toTable={toT}
-                  isSelected={selectedElement?.id === rel.id}
-                  onSelect={e => {
-                    if (isSpacePressed || isPanning || activeTool === 'pan') return;
-                    e.stopPropagation();
-                    setSelectedElement({ id: rel.id, type: 'relation' });
+                <div
+                  key={frame.id}
+                  style={{ zIndex: isStyleMenuOpen ? 100 : 0 }}
+                  className={`relative ${isStyleMenuOpen ? 'z-[100]' : 'z-0'}`}
+                  onMouseDown={e => {
+                    if (isSpacePressed || activeTool === 'pan') {
+                      setIsPanning(true);
+                      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+                      return;
+                    }
+                    if (activePopup && activePopup !== 'frame_style_' + frame.id) {
+                      setActivePopup(null);
+                    }
+                    // Bring frame to foreground among frames on drag start
+                    setFrames(prev => {
+                      const target = prev.find(f => f.id === frame.id);
+                      if (!target) return prev;
+                      return [...prev.filter(f => f.id !== frame.id), target];
+                    });
+                    handleStartDragNode(frame.id, 'frame', e);
                   }}
-                  onUpdate={handleUpdateRelation}
-                  onDelete={handleDeleteRelation}
-                  fontScale={fontSizePercent / 100}
-                />
+                >
+                  <FrameCard
+                    frame={frame}
+                    isSelected={isSelected}
+                    isOpenStyleMenu={isStyleMenuOpen}
+                    onToggleStyleMenu={open => setActivePopup(open ? 'frame_style_' + frame.id : null)}
+                    onSelect={e => {
+                      if (isSpacePressed || isPanning || activeTool === 'pan') return;
+                      e.stopPropagation();
+                      if (activePopup && activePopup !== 'frame_style_' + frame.id) {
+                        setActivePopup(null);
+                      }
+                      setSelectedElement({ id: frame.id, type: 'frame' });
+                      // Bring to front among frames
+                      setFrames(prev => {
+                        const target = prev.find(f => f.id === frame.id);
+                        if (!target) return prev;
+                        return [...prev.filter(f => f.id !== frame.id), target];
+                      });
+                    }}
+                    onUpdate={handleUpdateFrame}
+                    onDelete={handleDeleteFrame}
+                    onStartResize={(handle, e) => handleStartResize(frame.id, 'frame', handle, e)}
+                  />
+                </div>
               );
             })}
-
-            {/* Live temporary connection preview line */}
-            {renderTemporaryConnector()}
-          </svg>
-
-          {/* Layer 3: Sticky Notes */}
-          <div className="relative pointer-events-auto z-15">
-            {stickies.map(sticky => (
-              <div
-                key={sticky.id}
-                onMouseDown={e => {
-                  if (isSpacePressed || activeTool === 'pan') {
-                    setIsPanning(true);
-                    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-                    return;
-                  }
-                  handleStartDragNode(sticky.id, 'sticky', e);
-                }}
-              >
-                <StickyNote
-                  sticky={sticky}
-                  isSelected={selectedElement?.id === sticky.id}
-                  onSelect={e => {
-                    if (isSpacePressed || isPanning || activeTool === 'pan') return;
-                    e.stopPropagation();
-                    setSelectedElement({ id: sticky.id, type: 'sticky' });
-                  }}
-                  onUpdate={handleUpdateSticky}
-                  onDelete={handleDeleteSticky}
-                />
-              </div>
-            ))}
           </div>
 
-          {/* Layer 4: Entity Tables */}
-          <div className="relative pointer-events-auto z-20">
-            {tables.map(table => (
-              <div
-                key={table.id}
-                onMouseDown={e => {
-                  if (isSpacePressed || activeTool === 'pan') {
-                    setIsPanning(true);
-                    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-                    return;
-                  }
-                  handleStartDragNode(table.id, 'table', e);
-                }}
+          {/* Layer 2: SVG Relationships & Connectors - elevated to z-[50]/[100] when selected or relation context menu is open */}
+          {(() => {
+            const hasAnyRelPopup = relationships.some(r => activePopup === 'rel_menu_' + r.id);
+            const hasSelectedRel = selectedElement?.type === 'relation';
+            return (
+              <svg 
+                style={{ zIndex: hasAnyRelPopup ? 100 : hasSelectedRel ? 50 : 10 }}
+                className={`absolute left-0 top-0 overflow-visible w-[1px] h-[1px] pointer-events-auto ${hasAnyRelPopup ? 'z-[100]' : hasSelectedRel ? 'z-[50]' : 'z-10'}`}
               >
-                <TableCard
-                  table={table}
-                  databases={databases}
-                  fontScale={fontSizePercent / 100}
-                  isSelected={selectedElement?.id === table.id}
-                  onSelect={e => {
-                    if (isSpacePressed || isPanning || activeTool === 'pan') return;
-                    e.stopPropagation();
-                    setSelectedElement({ id: table.id, type: 'table' });
+                {relationships.map(rel => {
+                  const fromT = tables.find(t => t.id === rel.fromTableId);
+                  const toT = tables.find(t => t.id === rel.toTableId);
+                  const isMenuOpen = activePopup === 'rel_menu_' + rel.id;
+                  return (
+                    <ConnectorLine
+                      key={rel.id}
+                      relationship={rel}
+                      fromTable={fromT}
+                      toTable={toT}
+                      isSelected={selectedElement?.id === rel.id}
+                      isOpenMenu={isMenuOpen}
+                      onToggleMenu={open => setActivePopup(open ? 'rel_menu_' + rel.id : null)}
+                      onSelect={e => {
+                        if (isSpacePressed || isPanning || activeTool === 'pan') return;
+                        e.stopPropagation();
+                        if (activePopup && activePopup !== 'rel_menu_' + rel.id) {
+                          setActivePopup(null);
+                        }
+                        setSelectedElement({ id: rel.id, type: 'relation' });
+                      }}
+                      onUpdate={handleUpdateRelation}
+                      onDelete={handleDeleteRelation}
+                      fontScale={fontSizePercent / 100}
+                      zoom={zoom}
+                    />
+                  );
+                })}
+
+                {/* Live temporary connection preview line */}
+                {renderTemporaryConnector()}
+              </svg>
+            );
+          })()}
+
+          {/* Layer 3: Sticky Notes - elevated to z-[100] when color picker is open */}
+          <div className="relative pointer-events-auto">
+            {stickies.map(sticky => {
+              const isColorOpen = activePopup === 'sticky_color_' + sticky.id;
+              return (
+                <div
+                  key={sticky.id}
+                  style={{ zIndex: isColorOpen ? 100 : 15 }}
+                  className={`relative ${isColorOpen ? 'z-[100]' : 'z-15'}`}
+                  onMouseDown={e => {
+                    if (isSpacePressed || activeTool === 'pan') {
+                      setIsPanning(true);
+                      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+                      return;
+                    }
+                    if (activePopup && activePopup !== 'sticky_color_' + sticky.id) {
+                      setActivePopup(null);
+                    }
+                    // Bring clicked sticky to top of stickies
+                    setStickies(prev => {
+                      const target = prev.find(s => s.id === sticky.id);
+                      if (!target) return prev;
+                      return [...prev.filter(s => s.id !== sticky.id), target];
+                    });
+                    handleStartDragNode(sticky.id, 'sticky', e);
                   }}
-                  onUpdateTable={handleUpdateTable}
-                  onDeleteTable={handleDeleteTable}
-                  onDuplicateTable={handleDuplicateTable}
-                  onStartConnection={handleStartConnection}
-                  onEndConnection={handleEndConnection}
-                  connectingSource={connectingSource}
-                  onAddStepForTable={tblName => {
-                    setSelectedTableForStep(tblName);
-                    setIsAddStepOpen(true);
+                >
+                  <StickyNote
+                    sticky={sticky}
+                    isSelected={selectedElement?.id === sticky.id}
+                    isOpenColorPicker={isColorOpen}
+                    onToggleColorPicker={open => setActivePopup(open ? 'sticky_color_' + sticky.id : null)}
+                    onSelect={e => {
+                      if (isSpacePressed || isPanning || activeTool === 'pan') return;
+                      e.stopPropagation();
+                      if (activePopup && activePopup !== 'sticky_color_' + sticky.id) {
+                        setActivePopup(null);
+                      }
+                      setSelectedElement({ id: sticky.id, type: 'sticky' });
+                      setStickies(prev => {
+                        const target = prev.find(s => s.id === sticky.id);
+                        if (!target) return prev;
+                        return [...prev.filter(s => s.id !== sticky.id), target];
+                      });
+                    }}
+                    onUpdate={handleUpdateSticky}
+                    onDelete={handleDeleteSticky}
+                    onStartResize={(handle, e) => handleStartResize(sticky.id, 'sticky', handle, e)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Layer 4: Entity Tables - elevated to z-[100] when any dropdown is open */}
+          <div className="relative pointer-events-auto">
+            {tables.map(table => {
+              const hasTablePopup = !!activePopup && activePopup.startsWith('table_') && activePopup.includes(table.id);
+              return (
+                <div
+                  key={table.id}
+                  style={{ zIndex: hasTablePopup ? 100 : 20 }}
+                  className={`relative ${hasTablePopup ? 'z-[100]' : 'z-20'}`}
+                  onMouseDown={e => {
+                    if (isSpacePressed || activeTool === 'pan') {
+                      setIsPanning(true);
+                      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+                      return;
+                    }
+                    if (activePopup && !activePopup.includes(table.id)) {
+                      setActivePopup(null);
+                    }
+                    // Bring clicked table to top of tables
+                    setTables(prev => {
+                      const target = prev.find(t => t.id === table.id);
+                      if (!target) return prev;
+                      return [...prev.filter(t => t.id !== table.id), target];
+                    });
+                    handleStartDragNode(table.id, 'table', e);
                   }}
-                />
-              </div>
-            ))}
+                >
+                  <TableCard
+                    table={table}
+                    databases={databases}
+                    fontScale={fontSizePercent / 100}
+                    isSelected={selectedElement?.id === table.id}
+                    activePopupId={activePopup}
+                    onSetActivePopup={setActivePopup}
+                    onSelect={e => {
+                      if (isSpacePressed || isPanning || activeTool === 'pan') return;
+                      e.stopPropagation();
+                      if (activePopup && !activePopup.includes(table.id)) {
+                        setActivePopup(null);
+                      }
+                      setSelectedElement({ id: table.id, type: 'table' });
+                      setTables(prev => {
+                        const target = prev.find(t => t.id === table.id);
+                        if (!target) return prev;
+                        return [...prev.filter(t => t.id !== table.id), target];
+                      });
+                    }}
+                    onUpdateTable={handleUpdateTable}
+                    onDeleteTable={handleDeleteTable}
+                    onDuplicateTable={handleDuplicateTable}
+                    onStartConnection={handleStartConnection}
+                    onEndConnection={handleEndConnection}
+                    connectingSource={connectingSource}
+                    onAddStepForTable={tblName => {
+                      setSelectedTableForStep(tblName);
+                      setIsAddStepOpen(true);
+                    }}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

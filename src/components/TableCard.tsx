@@ -29,6 +29,8 @@ interface TableCardProps {
   onAddStepForTable?: (tableName: string) => void;
   databases?: DatabaseItem[];
   fontScale?: number;
+  activePopupId?: string | null;
+  onSetActivePopup?: (id: string | null) => void;
 }
 
 // Clean SQL types: uuid removed, bigserial removed, jsonf/jsonb removed, varchar without size
@@ -71,6 +73,8 @@ export const TableCard: React.FC<TableCardProps> = ({
   onAddStepForTable,
   databases,
   fontScale = 1,
+  activePopupId,
+  onSetActivePopup,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(table.name);
@@ -83,25 +87,50 @@ export const TableCard: React.FC<TableCardProps> = ({
   const modifiersDropdownRef = useRef<HTMLDivElement>(null);
 
   const currentTheme = THEME_COLORS.find(c => c.id === table.color) || THEME_COLORS[0];
-
   const currentDb = databases?.find(d => d.id === table.databaseId) || (databases && databases.length > 0 ? databases[0] : null);
+
+  const isColorPickerOpen = activePopupId === `table_color_${table.id}` || (!onSetActivePopup && showColorPicker);
+  const isDbPickerOpen = activePopupId === `table_db_${table.id}` || (!onSetActivePopup && showDbPicker);
+  const isTypeDropdownOpen = (colId: string) => activePopupId === `table_type_${table.id}_${colId}` || (!onSetActivePopup && activeTypeDropdownColId === colId);
+  const isModifiersColOpen = (colId: string) => activePopupId === `table_mod_${table.id}_${colId}` || (!onSetActivePopup && activeModifiersColId === colId);
+
+  const toggleColorPicker = () => {
+    if (onSetActivePopup) {
+      onSetActivePopup(isColorPickerOpen ? null : `table_color_${table.id}`);
+    } else {
+      setShowColorPicker(!showColorPicker);
+    }
+  };
+
+  const toggleDbPicker = () => {
+    if (onSetActivePopup) {
+      onSetActivePopup(isDbPickerOpen ? null : `table_db_${table.id}`);
+    } else {
+      setShowDbPicker(!showDbPicker);
+    }
+  };
+
+  const toggleTypeDropdown = (colId: string) => {
+    if (onSetActivePopup) {
+      onSetActivePopup(isTypeDropdownOpen(colId) ? null : `table_type_${table.id}_${colId}`);
+    } else {
+      setActiveModifiersColId(null);
+      setActiveTypeDropdownColId(activeTypeDropdownColId === colId ? null : colId);
+    }
+  };
+
+  const toggleModifiers = (colId: string) => {
+    if (onSetActivePopup) {
+      onSetActivePopup(isModifiersColOpen(colId) ? null : `table_mod_${table.id}_${colId}`);
+    } else {
+      setActiveTypeDropdownColId(null);
+      setActiveModifiersColId(activeModifiersColId === colId ? null : colId);
+    }
+  };
 
   useEffect(() => {
     setTitleInput(table.name);
   }, [table.name]);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target as Node)) {
-        setActiveTypeDropdownColId(null);
-      }
-      if (modifiersDropdownRef.current && !modifiersDropdownRef.current.contains(e.target as Node)) {
-        setActiveModifiersColId(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const handleTitleSubmit = () => {
     setIsEditingTitle(false);
@@ -218,14 +247,21 @@ export const TableCard: React.FC<TableCardProps> = ({
           {databases && databases.length > 1 && (
             <div className="relative">
               <button
-                onClick={() => setShowDbPicker(!showDbPicker)}
+                data-popup-trigger="true"
+                onClick={toggleDbPicker}
                 title="Cambiar base de datos de esta tabla"
                 className="p-1 rounded hover:bg-black/20 transition-colors"
               >
                 <Database className="w-3.5 h-3.5" />
               </button>
-              {showDbPicker && (
-                <div data-dropdown="true" className="absolute right-0 top-full mt-1.5 p-1 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[150px] z-50">
+              {isDbPickerOpen && (
+                <div 
+                  data-popup="true"
+                  data-dropdown="true" 
+                  onClick={e => e.stopPropagation()}
+                  onMouseDown={e => e.stopPropagation()}
+                  className="absolute right-0 top-full mt-1.5 p-1 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[150px] z-[150]"
+                >
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block px-2 py-1">
                     Mover a Base de Datos:
                   </span>
@@ -235,7 +271,7 @@ export const TableCard: React.FC<TableCardProps> = ({
                       onClick={e => {
                         e.stopPropagation();
                         onUpdateTable({ ...table, databaseId: db.id });
-                        setShowDbPicker(false);
+                        toggleDbPicker();
                       }}
                       className={`w-full text-left font-mono text-[11px] px-2 py-1 rounded transition-colors flex items-center justify-between ${
                         (table.databaseId === db.id || (!table.databaseId && databases[0]?.id === db.id))
@@ -256,18 +292,28 @@ export const TableCard: React.FC<TableCardProps> = ({
           {/* Color palette toggle */}
           <div className="relative">
             <button
-              onClick={() => setShowColorPicker(!showColorPicker)}
+              data-popup-trigger="true"
+              onClick={toggleColorPicker}
               title="Cambiar color de cabecera"
               className="p-1 rounded hover:bg-black/20 transition-colors"
             >
               <Palette className="w-3.5 h-3.5" />
             </button>
-            {showColorPicker && (
-              <div data-dropdown="true" className="absolute right-0 top-full mt-1.5 p-1.5 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 grid grid-cols-4 gap-1.5 z-50">
+            {isColorPickerOpen && (
+              <div 
+                data-popup="true"
+                data-dropdown="true" 
+                onClick={e => e.stopPropagation()}
+                onMouseDown={e => e.stopPropagation()}
+                className="absolute right-0 top-full mt-1.5 p-1.5 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 grid grid-cols-4 gap-1.5 z-[150]"
+              >
                 {THEME_COLORS.map(c => (
                   <button
                     key={c.id}
-                    onClick={e => handleColorSelect(c.id, e)}
+                    onClick={e => {
+                      handleColorSelect(c.id, e);
+                      toggleColorPicker();
+                    }}
                     title={c.name}
                     className={`w-5 h-5 rounded-md ${c.header} flex items-center justify-center transition-transform hover:scale-110`}
                   >
@@ -359,7 +405,7 @@ export const TableCard: React.FC<TableCardProps> = ({
         {table.columns.map(col => {
           const isPK = col.isPK;
           const isFK = col.isFK;
-          const isModifiersOpen = activeModifiersColId === col.id;
+          const isModifiersOpen = isModifiersColOpen(col.id);
 
           // Compute compact tags to display on the right (excluding PK and FK, which are shown on the left as icons)
           const activeTags: string[] = [];
@@ -427,21 +473,22 @@ export const TableCard: React.FC<TableCardProps> = ({
               {/* 3. Data Type Dropdown */}
               <div className="w-[78px] relative" onClick={e => e.stopPropagation()}>
                 <button
-                  onClick={() => {
-                    setActiveModifiersColId(null);
-                    setActiveTypeDropdownColId(activeTypeDropdownColId === col.id ? null : col.id);
-                  }}
+                  data-popup-trigger="true"
+                  onClick={() => toggleTypeDropdown(col.id)}
                   className="w-full font-mono text-[10px] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white px-1.5 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between transition-colors border border-slate-200/70 dark:border-slate-700/70 bg-white/60 dark:bg-slate-800/60"
                 >
                   <span className="font-semibold truncate">{col.type}</span>
                   <ChevronDown className="w-2.5 h-2.5 opacity-60 shrink-0 ml-0.5" />
                 </button>
 
-                {activeTypeDropdownColId === col.id && (
+                {isTypeDropdownOpen(col.id) && (
                   <div
                     ref={typeDropdownRef}
+                    data-popup="true"
                     data-dropdown="true"
-                    className="absolute left-0 top-full mt-1 w-32 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-1 z-50 max-h-48 overflow-y-auto"
+                    onClick={e => e.stopPropagation()}
+                    onMouseDown={e => e.stopPropagation()}
+                    className="absolute left-0 top-full mt-1 w-32 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-1 z-[150] max-h-48 overflow-y-auto"
                   >
                     {COMMON_SQL_TYPES.map(t => (
                       <button
@@ -452,7 +499,7 @@ export const TableCard: React.FC<TableCardProps> = ({
                             length: t === 'DECIMAL' ? (col.length || '10') : col.length,
                             decimals: t === 'DECIMAL' ? (col.decimals !== undefined ? col.decimals : '2') : col.decimals,
                           });
-                          setActiveTypeDropdownColId(null);
+                          toggleTypeDropdown(col.id);
                         }}
                         className={`w-full text-left font-mono text-[11px] px-2 py-1 rounded transition-colors ${
                           col.type === t
@@ -506,10 +553,8 @@ export const TableCard: React.FC<TableCardProps> = ({
               {/* 5. Desplegable de opciones y restricciones */}
               <div className="w-[60px] relative" onClick={e => e.stopPropagation()}>
                 <button
-                  onClick={() => {
-                    setActiveTypeDropdownColId(null);
-                    setActiveModifiersColId(isModifiersOpen ? null : col.id);
-                  }}
+                  data-popup-trigger="true"
+                  onClick={() => toggleModifiers(col.id)}
                   title="Configurar opciones y restricciones del campo (NULL, Auto Increment, Default, etc.)"
                   className={`w-full flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] font-mono border transition-all ${
                     isModifiersOpen
@@ -547,8 +592,11 @@ export const TableCard: React.FC<TableCardProps> = ({
                 {isModifiersOpen && (
                   <div
                     ref={modifiersDropdownRef}
+                    data-popup="true"
                     data-dropdown="true"
-                    className="absolute right-0 top-full mt-1.5 w-60 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2.5 z-50 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-100 max-h-80 overflow-y-auto"
+                    onClick={e => e.stopPropagation()}
+                    onMouseDown={e => e.stopPropagation()}
+                    className="absolute right-0 top-full mt-1.5 w-60 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2.5 z-[150] text-xs space-y-2 animate-in fade-in zoom-in-95 duration-100 max-h-80 overflow-y-auto"
                   >
                     <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
                       <span className="font-bold text-[11px] text-slate-900 dark:text-slate-100 flex items-center gap-1">
@@ -556,7 +604,7 @@ export const TableCard: React.FC<TableCardProps> = ({
                         Opciones de "{col.name}"
                       </span>
                       <button
-                        onClick={() => setActiveModifiersColId(null)}
+                        onClick={() => toggleModifiers(col.id)}
                         className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold hover:underline"
                       >
                         Listo

@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { TableNode, StickyNode, FrameNode } from '../types/erd';
 import { TABLE_WIDTH, getTableHeight } from '../utils/canvasMath';
 
@@ -24,6 +24,8 @@ export const Minimap: React.FC<MinimapProps> = ({
   onPanChange,
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
+  const [isDraggingViewport, setIsDraggingViewport] = useState(false);
+
   const MAP_W = 180;
   const MAP_H = 120;
 
@@ -48,46 +50,128 @@ export const Minimap: React.FC<MinimapProps> = ({
     });
   }
 
-  const worldW = maxX - minX;
-  const worldH = maxY - minY;
+  const worldW = Math.max(maxX - minX, 100);
+  const worldH = Math.max(maxY - minY, 100);
 
   const scaleX = MAP_W / worldW;
   const scaleY = MAP_H / worldH;
-  const scale = Math.min(scaleX, scaleY);
+  const scale = Math.max(Math.min(scaleX, scaleY), 0.01);
 
   // Viewport calculation
   const vpWorldX = -pan.x / zoom;
   const vpWorldY = -pan.y / zoom;
-  const vpWorldW = canvasWidth / zoom;
-  const vpWorldH = canvasHeight / zoom;
+  const vpWorldW = (canvasWidth || 800) / zoom;
+  const vpWorldH = (canvasHeight || 600) / zoom;
 
   const vpMapX = (vpWorldX - minX) * scale;
   const vpMapY = (vpWorldY - minY) * scale;
   const vpMapW = vpWorldW * scale;
   const vpMapH = vpWorldH * scale;
 
-  const handleMapClick = (e: React.MouseEvent) => {
+  // Handle clicking or dragging on the minimap background
+  const handleMapMouseDown = (e: React.MouseEvent) => {
     if (!mapRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+
     const rect = mapRef.current.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
+    // Center viewport on clicked point
     const targetWorldX = minX + clickX / scale;
     const targetWorldY = minY + clickY / scale;
 
-    const newPanX = -(targetWorldX * zoom - canvasWidth / 2);
-    const newPanY = -(targetWorldY * zoom - canvasHeight / 2);
+    const initialPanX = -(targetWorldX * zoom - (canvasWidth || 800) / 2);
+    const initialPanY = -(targetWorldY * zoom - (canvasHeight || 600) / 2);
 
-    onPanChange({ x: newPanX, y: newPanY });
+    onPanChange({ x: initialPanX, y: initialPanY });
+    setIsDraggingViewport(true);
+
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startClientX;
+      const deltaY = moveEvent.clientY - startClientY;
+      const newPanX = initialPanX - (deltaX / scale) * zoom;
+      const newPanY = initialPanY - (deltaY / scale) * zoom;
+      onPanChange({ x: newPanX, y: newPanY });
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingViewport(false);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  // Handle clicking and dragging directly on the yellow viewport box
+  const handleViewportMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    setIsDraggingViewport(true);
+
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const startPanX = pan.x;
+    const startPanY = pan.y;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startClientX;
+      const deltaY = moveEvent.clientY - startClientY;
+      const newPanX = startPanX - (deltaX / scale) * zoom;
+      const newPanY = startPanY - (deltaY / scale) * zoom;
+      onPanChange({ x: newPanX, y: newPanY });
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingViewport(false);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
   };
 
   return (
     <div
       ref={mapRef}
-      onClick={handleMapClick}
+      onMouseDown={handleMapMouseDown}
       style={{ width: MAP_W, height: MAP_H }}
-      className="absolute right-4 bottom-16 z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl overflow-hidden cursor-crosshair select-none"
+      className={`absolute right-4 bottom-16 z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl overflow-hidden select-none transition-shadow ${
+        isDraggingViewport ? 'cursor-grabbing ring-2 ring-amber-500/50 shadow-2xl' : 'cursor-crosshair'
+      }`}
+      title="Minimapa: Arrastra el recuadro amarillo para mover el lienzo"
     >
+      {/* Frames preview (rendered at base) */}
+      {frames.map(f => {
+        const x = (f.x - minX) * scale;
+        const y = (f.y - minY) * scale;
+        const w = Math.max(f.width * scale, 4);
+        const h = Math.max(f.height * scale, 4);
+        return (
+          <div
+            key={f.id}
+            style={{ 
+              left: x, 
+              top: y, 
+              width: w, 
+              height: h,
+              borderColor: f.borderColor || '#94a3b8',
+              backgroundColor: f.bgColor && f.bgColor !== 'transparent' ? f.bgColor : undefined,
+              borderStyle: f.borderStyle || 'dashed',
+            }}
+            className="absolute border rounded-sm pointer-events-none"
+          />
+        );
+      })}
+
       {/* Tables preview boxes */}
       {tables.map(t => {
         const x = (t.x - minX) * scale;
@@ -98,7 +182,7 @@ export const Minimap: React.FC<MinimapProps> = ({
           <div
             key={t.id}
             style={{ left: x, top: y, width: w, height: h }}
-            className="absolute bg-slate-400 dark:bg-slate-600 rounded-[2px]"
+            className="absolute bg-slate-400 dark:bg-slate-500 rounded-[2px] pointer-events-none"
           />
         );
       })}
@@ -113,35 +197,25 @@ export const Minimap: React.FC<MinimapProps> = ({
           <div
             key={s.id}
             style={{ left: x, top: y, width: w, height: h }}
-            className="absolute bg-amber-300 dark:bg-amber-500 rounded-[1px]"
+            className="absolute bg-amber-400 dark:bg-amber-500 rounded-[1px] pointer-events-none"
           />
         );
       })}
 
-      {/* Frames preview */}
-      {frames.map(f => {
-        const x = (f.x - minX) * scale;
-        const y = (f.y - minY) * scale;
-        const w = f.width * scale;
-        const h = f.height * scale;
-        return (
-          <div
-            key={f.id}
-            style={{ left: x, top: y, width: w, height: h }}
-            className="absolute border border-dashed border-slate-300 dark:border-slate-700 rounded-sm pointer-events-none"
-          />
-        );
-      })}
-
-      {/* Camera Viewport Rectangle */}
+      {/* Camera Viewport Rectangle (Yellow/Amber box) */}
       <div
+        onMouseDown={handleViewportMouseDown}
         style={{
-          left: Math.max(vpMapX, 0),
-          top: Math.max(vpMapY, 0),
-          width: Math.min(vpMapW, MAP_W),
-          height: Math.min(vpMapH, MAP_H),
+          left: vpMapX,
+          top: vpMapY,
+          width: Math.max(vpMapW, 14),
+          height: Math.max(vpMapH, 10),
         }}
-        className="absolute border-2 border-amber-500 bg-amber-500/15 rounded pointer-events-none transition-all duration-75"
+        className={`absolute border-2 border-amber-500 dark:border-amber-400 rounded transition-colors ${
+          isDraggingViewport
+            ? 'cursor-grabbing bg-amber-500/35 ring-2 ring-amber-400/50 shadow-md'
+            : 'cursor-grab bg-amber-500/20 dark:bg-amber-400/25 hover:bg-amber-500/30'
+        }`}
       />
     </div>
   );

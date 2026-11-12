@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { StickyNode, StickyColor } from '../types/erd';
 import { Trash2, Palette, Check } from 'lucide-react';
+import { ResizeHandles, ResizeHandle } from './ResizeHandles';
 
 interface StickyNoteProps {
   sticky: StickyNode;
@@ -8,6 +9,9 @@ interface StickyNoteProps {
   onSelect: (e: React.MouseEvent) => void;
   onUpdate: (updated: StickyNode) => void;
   onDelete: (id: string) => void;
+  onStartResize?: (handle: ResizeHandle, e: React.MouseEvent) => void;
+  isOpenColorPicker?: boolean;
+  onToggleColorPicker?: (open: boolean) => void;
 }
 
 const STICKY_COLORS: { id: StickyColor; name: string; bg: string; text: string; border: string }[] = [
@@ -25,9 +29,21 @@ export const StickyNote: React.FC<StickyNoteProps> = ({
   onSelect,
   onUpdate,
   onDelete,
+  onStartResize,
+  isOpenColorPicker,
+  onToggleColorPicker,
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const currentColor = STICKY_COLORS.find(c => c.id === sticky.color) || STICKY_COLORS[0];
+
+  const isColorOpen = isOpenColorPicker !== undefined ? isOpenColorPicker : showColorPicker;
+  const toggleColorPicker = () => {
+    if (onToggleColorPicker) {
+      onToggleColorPicker(!isColorOpen);
+    } else {
+      setShowColorPicker(!showColorPicker);
+    }
+  };
 
   return (
     <div
@@ -35,9 +51,10 @@ export const StickyNote: React.FC<StickyNoteProps> = ({
       style={{
         transform: `translate3d(${sticky.x}px, ${sticky.y}px, 0)`,
         width: sticky.width,
-        minHeight: sticky.height,
+        height: sticky.height,
+        minHeight: 80,
       }}
-      className={`absolute left-0 top-0 rounded-lg p-3 shadow-md flex flex-col justify-between border select-none group transition-shadow ${
+      className={`absolute left-0 top-0 rounded-lg p-3 shadow-md flex flex-col justify-between border select-none group/resizable group transition-shadow ${
         currentColor.bg
       } ${currentColor.border} ${
         isSelected
@@ -45,6 +62,13 @@ export const StickyNote: React.FC<StickyNoteProps> = ({
           : 'hover:shadow-lg'
       }`}
     >
+      {/* 8 resize handle points on border */}
+      {onStartResize && (
+        <ResizeHandles
+          isSelected={isSelected}
+          onStartResize={onStartResize}
+        />
+      )}
       {/* Sticky top toolbar */}
       <div className="flex items-center justify-between gap-1 opacity-60 group-hover:opacity-100 transition-opacity mb-2">
         <span className="text-[10px] font-mono tracking-wide uppercase opacity-70">Nota</span>
@@ -53,19 +77,26 @@ export const StickyNote: React.FC<StickyNoteProps> = ({
           {/* Color palette */}
           <div className="relative">
             <button
-              onClick={() => setShowColorPicker(!showColorPicker)}
+              data-popup-trigger="true"
+              onClick={() => toggleColorPicker()}
               className="p-1 rounded hover:bg-black/10 transition-colors"
             >
               <Palette className="w-3 h-3" />
             </button>
-            {showColorPicker && (
-              <div className="absolute right-0 top-full mt-1 p-1 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 grid grid-cols-3 gap-1 z-50">
+            {isColorOpen && (
+              <div
+                data-popup="true"
+                data-dropdown="true"
+                onClick={e => e.stopPropagation()}
+                onMouseDown={e => e.stopPropagation()}
+                className="absolute right-0 top-full mt-1 p-1 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 grid grid-cols-3 gap-1 z-[150]"
+              >
                 {STICKY_COLORS.map(c => (
                   <button
                     key={c.id}
                     onClick={() => {
                       onUpdate({ ...sticky, color: c.id });
-                      setShowColorPicker(false);
+                      toggleColorPicker();
                     }}
                     className={`w-4 h-4 rounded ${c.bg} border ${c.border} flex items-center justify-center`}
                   >
@@ -95,8 +126,7 @@ export const StickyNote: React.FC<StickyNoteProps> = ({
         onChange={e => onUpdate({ ...sticky, text: e.target.value })}
         onClick={e => e.stopPropagation()}
         placeholder="Escribe una nota aquí..."
-        rows={4}
-        className={`w-full bg-transparent resize-none outline-none text-xs leading-relaxed font-sans ${currentColor.text} placeholder:opacity-50`}
+        className={`flex-1 w-full bg-transparent resize-none outline-none text-xs leading-relaxed font-sans ${currentColor.text} placeholder:opacity-50`}
       />
     </div>
   );
