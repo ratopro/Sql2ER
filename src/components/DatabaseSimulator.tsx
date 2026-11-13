@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Database, 
   Play, 
@@ -14,6 +14,8 @@ import {
   Trash2, 
   CheckCircle2, 
   AlertCircle, 
+  AlertTriangle,
+  Crosshair,
   Download, 
   Clock, 
   Copy, 
@@ -21,13 +23,16 @@ import {
   HelpCircle,
   Table as TableIcon,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Plus,
+  X
 } from 'lucide-react';
 import { ERDSchema } from '../types/erd';
 import { 
   dbSimulator, 
   SimulatedTableInfo, 
   QueryExecutionResult, 
+  SqlDiagnostic,
   escapeIdent 
 } from '../utils/databaseSimulatorEngine';
 
@@ -36,6 +41,13 @@ interface DatabaseSimulatorProps {
   onBackToDiagram: () => void;
   onReRunSimulation: () => void;
   isDark: boolean;
+}
+
+interface SqlEditorTab {
+  id: string;
+  title: string;
+  sql: string;
+  result: QueryExecutionResult | null;
 }
 
 export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
@@ -49,9 +61,12 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
   const [tableSearch, setTableSearch] = useState('');
   
-  // SQL Console state
-  const [sqlCode, setSqlCode] = useState<string>('');
-  const [queryResult, setQueryResult] = useState<QueryExecutionResult | null>(null);
+  // Multi-tab SQL Console state
+  const tabCounterRef = useRef<number>(1);
+  const [sqlTabs, setSqlTabs] = useState<SqlEditorTab[]>([
+    { id: 'tab_1', title: 'Consulta 1', sql: '', result: null },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>('tab_1');
   const [queryHistory, setQueryHistory] = useState<string[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [copiedResult, setCopiedResult] = useState(false);
@@ -59,6 +74,63 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
   const [showLogs, setShowLogs] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const gutterRef = useRef<HTMLDivElement>(null);
+  const cursorPosRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+
+  const activeTab = sqlTabs.find(t => t.id === activeTabId) || sqlTabs[0];
+  const sqlCode = activeTab?.sql ?? '';
+  const queryResult = activeTab?.result ?? null;
+
+  // Live SQL syntax & schema validation
+  const liveDiagnostic = useMemo<SqlDiagnostic>(() => {
+    return dbSimulator.validateSql(sqlCode, schema);
+  }, [sqlCode, schema, tablesInfo]);
+
+  const jumpToError = (diag: SqlDiagnostic) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = Math.max(0, Math.min(diag.offset, sqlCode.length));
+    const end = Math.max(start, Math.min(diag.offset + Math.max(1, diag.length), sqlCode.length));
+    el.focus();
+    el.setSelectionRange(start, end);
+    cursorPosRef.current = { start, end };
+    // Scroll textarea roughly to the offending line (20px line height)
+    const targetScroll = Math.max(0, (diag.line - 2) * 20);
+    el.scrollTop = targetScroll;
+    if (gutterRef.current) gutterRef.current.scrollTop = targetScroll;
+  };
+
+  const formatPointerLine = (lineText: string, column: number, length: number) => {
+    const maxWidth = 86;
+    const zeroCol = Math.max(0, column - 1);
+    let displayLine = lineText;
+    let displayCol = zeroCol;
+
+    if (lineText.length > maxWidth) {
+      const start = Math.max(0, zeroCol - 35);
+      const end = Math.min(lineText.length, start + maxWidth);
+      const prefix = start > 0 ? '...' : '';
+      const suffix = end < lineText.length ? '...' : '';
+      displayLine = prefix + lineText.slice(start, end) + suffix;
+      displayCol = prefix.length + (zeroCol - start);
+    }
+
+    const pointerLen = Math.max(1, Math.min(length, Math.max(1, displayLine.length - displayCol)));
+    return {
+      displayLine,
+      spaces: ' '.repeat(Math.max(0, displayCol)),
+      carets: '^'.repeat(pointerLen),
+    };
+  };
+
+  const setSqlCodeForTab = (tabId: string, newSql: string) => {
+    setSqlTabs(prev => prev.map(t => (t.id === tabId ? { ...t, sql: newSql } : t)));
+  };
+
+  const setSqlCode = (newSql: string) => {
+    if (!activeTab) return;
+    setSqlCodeForTab(activeTab.id, newSql);
+  };
 
   // Initialize or re-read simulation state
   const refreshSimulatorState = () => {
@@ -80,22 +152,85 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
     // Default query: SELECT * from first table
     if (schema.tables.length > 0) {
       const defaultQuery = `SELECT * FROM ${escapeIdent(schema.tables[0].name)};`;
-      setSqlCode(defaultQuery);
-      // Auto run first query to show immediate results
       const res = dbSimulator.execute(defaultQuery);
-      setQueryResult(res);
+      tabCounterRef.current = 1;
+      setSqlTabs([
+        {
+          id: 'tab_1',
+          title: 'Consulta 1',
+          sql: defaultQuery,
+          result: res,
+        },
+      ]);
+      setActiveTabId('tab_1');
+      cursorPosRef.current = { start: defaultQuery.length, end: defaultQuery.length };
     }
   }, [schema]);
 
+  // Tab management
+  const handleAddTab = () => {
+    tabCounterRef.current += 1;
+    const newId = `tab_${Date.now()}_${tabCounterRef.current}`;
+    const newTab: SqlEditorTab = {
+      id: newId,
+      title: `Consulta ${tabCounterRef.current}`,
+      sql: '',
+      result: null,
+    };
+    setSqlTabs(prev => [...prev, newTab]);
+    setActiveTabId(newId);
+    cursorPosRef.current = { start: 0, end: 0 };
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  };
+
+  const handleCloseTab = (tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSqlTabs(prev => {
+      if (prev.length <= 1) {
+        // Replace single closed tab with a clean new empty tab
+        tabCounterRef.current += 1;
+        const freshId = `tab_${Date.now()}_${tabCounterRef.current}`;
+        setActiveTabId(freshId);
+        cursorPosRef.current = { start: 0, end: 0 };
+        return [{ id: freshId, title: `Consulta ${tabCounterRef.current}`, sql: '', result: null }];
+      }
+
+      const idx = prev.findIndex(t => t.id === tabId);
+      const nextTabs = prev.filter(t => t.id !== tabId);
+
+      if (tabId === activeTabId) {
+        const nextActive = nextTabs[Math.max(0, idx - 1)] || nextTabs[0];
+        if (nextActive) {
+          setActiveTabId(nextActive.id);
+          cursorPosRef.current = { start: nextActive.sql.length, end: nextActive.sql.length };
+        }
+      }
+      return nextTabs;
+    });
+  };
+
+  const handleSwitchTab = (tab: SqlEditorTab) => {
+    setActiveTabId(tab.id);
+    cursorPosRef.current = { start: tab.sql.length, end: tab.sql.length };
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  };
+
   // Handle SQL execution
-  const handleExecute = (codeToRun?: string) => {
+  const handleExecute = (codeToRun?: string, targetTabIdOverride?: string) => {
+    const targetId = targetTabIdOverride || activeTab?.id;
+    if (!targetId) return;
+
     const query = (codeToRun !== undefined ? codeToRun : sqlCode).trim();
     if (!query) return;
 
     setIsExecuting(true);
     setTimeout(() => {
       const result = dbSimulator.execute(query);
-      setQueryResult(result);
+      setSqlTabs(prev => prev.map(t => (t.id === targetId ? { ...t, result } : t)));
       setIsExecuting(false);
 
       // Add to history if unique
@@ -117,11 +252,55 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
     }
   };
 
+  // Track cursor position in SQL textarea
+  const updateCursorPosition = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    cursorPosRef.current = {
+      start: el.selectionStart ?? sqlCode.length,
+      end: el.selectionEnd ?? sqlCode.length,
+    };
+  };
+
+  // Double-click a field in the explorer to insert it at the cursor position in the active SQL tab
+  const handleInsertFieldToEditor = (fieldName: string) => {
+    if (!activeTab) return;
+    const el = textareaRef.current;
+    const currentSql = activeTab.sql;
+    const isFocused = !!el && document.activeElement === el;
+    const start = isFocused ? (el.selectionStart ?? cursorPosRef.current.start) : cursorPosRef.current.start;
+    const end = isFocused ? (el.selectionEnd ?? cursorPosRef.current.end) : cursorPosRef.current.end;
+
+    const safeStart = Math.max(0, Math.min(start, currentSql.length));
+    const safeEnd = Math.max(safeStart, Math.min(end, currentSql.length));
+
+    const charBefore = safeStart > 0 ? currentSql[safeStart - 1] : '';
+    const charAfter = safeEnd < currentSql.length ? currentSql[safeEnd] : '';
+    const needsLeadingSpace = safeStart > 0 && !/[\s,(.]/.test(charBefore);
+    const needsTrailingSpace = safeEnd < currentSql.length && !/[\s,);.]/.test(charAfter);
+
+    const insertion = `${needsLeadingSpace ? ' ' : ''}${fieldName}${needsTrailingSpace ? ' ' : ''}`;
+    const updatedSql = currentSql.slice(0, safeStart) + insertion + currentSql.slice(safeEnd);
+    const newCaretPos = safeStart + insertion.length;
+
+    setSqlCodeForTab(activeTab.id, updatedSql);
+    cursorPosRef.current = { start: newCaretPos, end: newCaretPos };
+
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(newCaretPos, newCaretPos);
+      }
+    });
+  };
+
   // Quick action: SELECT from table
   const handleSelectFromTable = (tableName: string) => {
+    if (!activeTab) return;
     const q = `SELECT * FROM ${escapeIdent(tableName)};`;
-    setSqlCode(q);
-    handleExecute(q);
+    setSqlCodeForTab(activeTab.id, q);
+    cursorPosRef.current = { start: q.length, end: q.length };
+    handleExecute(q, activeTab.id);
     if (textareaRef.current) {
       textareaRef.current.focus();
     }
@@ -129,6 +308,7 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
 
   // Quick action: Pre-fill INSERT
   const handleInsertTemplate = (table: SimulatedTableInfo) => {
+    if (!activeTab) return;
     const cols = table.columns.filter(c => !c.isPK).slice(0, 4);
     const colNames = cols.map(c => escapeIdent(c.name)).join(', ');
     const dummyVals = cols.map(c => {
@@ -139,7 +319,8 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
     }).join(', ');
 
     const q = `INSERT INTO ${escapeIdent(table.name)} (${colNames})\nVALUES (${dummyVals});`;
-    setSqlCode(q);
+    setSqlCodeForTab(activeTab.id, q);
+    cursorPosRef.current = { start: q.length, end: q.length };
     if (textareaRef.current) {
       textareaRef.current.focus();
     }
@@ -174,8 +355,6 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
     setCopiedResult(true);
     setTimeout(() => setCopiedResult(false), 2000);
   };
-
-  const sampleQueries = dbSimulator.generateSampleQueries(schema);
 
   const filteredTables = tablesInfo.filter(t => 
     t.name.toLowerCase().includes(tableSearch.toLowerCase())
@@ -366,7 +545,12 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
                             {table.columns.map(col => (
                               <div
                                 key={col.name}
-                                className="flex items-center justify-between gap-1 px-2 py-1 rounded bg-slate-50 dark:bg-slate-800/60 font-mono text-[11px]"
+                                onDoubleClick={e => {
+                                  e.stopPropagation();
+                                  handleInsertFieldToEditor(col.name);
+                                }}
+                                title={`Doble clic para añadir '${col.name}' al editor SQL`}
+                                className="flex items-center justify-between gap-1 px-2 py-1 rounded bg-slate-50 dark:bg-slate-800/60 hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:ring-1 hover:ring-amber-300 dark:hover:ring-amber-700 font-mono text-[11px] cursor-pointer select-none transition-colors"
                               >
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   {col.isPK && (
@@ -460,38 +644,106 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
 
         {/* Right Column: SQL Editor & Results Viewer */}
         <main className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
+          {/* SQL Editor Tabs Bar */}
+          <div className="bg-slate-100 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 px-3 pt-1.5 flex items-center gap-1 overflow-x-auto shrink-0">
+            {sqlTabs.map(tab => {
+              const isActive = tab.id === activeTab?.id;
+              const tabDiag = tab.sql.trim() ? dbSimulator.validateSql(tab.sql, schema) : null;
+              const hasTabError = tabDiag && !tabDiag.valid;
+              return (
+                <div
+                  key={tab.id}
+                  onClick={() => handleSwitchTab(tab)}
+                  className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 py-1.5 rounded-t-lg text-xs cursor-pointer transition-colors shrink-0 border-t border-l border-r ${
+                    isActive
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border-slate-200 dark:border-slate-800 font-semibold -mb-px pb-[7px]'
+                      : 'bg-slate-200/50 dark:bg-slate-900/40 text-slate-600 dark:text-slate-400 border-transparent hover:bg-slate-200 dark:hover:bg-slate-800/70'
+                  }`}
+                >
+                  <FileCode className={`w-3 h-3 shrink-0 ${isActive ? 'text-amber-500' : 'text-slate-400'}`} />
+                  <span className="truncate max-w-[130px]">{tab.title}</span>
+                  {hasTabError && (
+                    <span
+                      title={`Línea ${tabDiag.line}, Col ${tabDiag.column}: ${tabDiag.message}`}
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        tabDiag.severity === 'error' ? 'bg-rose-500' : 'bg-amber-500'
+                      }`}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={e => handleCloseTab(tab.id, e)}
+                    title="Cerrar pestaña"
+                    className={`p-0.5 rounded transition-colors ${
+                      isActive
+                        ? 'text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        : 'text-slate-400 hover:text-rose-500 hover:bg-slate-300/60 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={handleAddTab}
+              title="Crear nueva pestaña SQL"
+              className="flex items-center gap-1 px-2 py-1 mb-0.5 rounded-md text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="text-[11px]">Nueva</span>
+            </button>
+          </div>
+
           {/* Top Console Toolbar */}
           <div className="h-11 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between shrink-0 gap-3">
-            <div className="flex items-center gap-2 overflow-x-auto py-1">
+            <div className="flex items-center gap-2.5 py-1 min-w-0">
               <span className="text-xs font-bold text-slate-600 dark:text-slate-400 shrink-0 flex items-center gap-1.5">
                 <FileCode className="w-3.5 h-3.5 text-amber-500" />
                 Editor SQL:
               </span>
 
-              {/* Sample Queries Dropdown */}
-              {sampleQueries.length > 0 && (
-                <div className="flex items-center gap-1 overflow-x-auto">
-                  {sampleQueries.slice(0, 3).map((sq, i) => (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        setSqlCode(sq.sql);
-                        handleExecute(sq.sql);
-                      }}
-                      title={sq.description}
-                      className="px-2 py-1 text-[11px] font-mono rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors shrink-0"
-                    >
-                      {sq.label}
-                    </button>
-                  ))}
-                </div>
+              {/* Real-time Syntax Status Pill */}
+              {sqlCode.trim() !== '' && (
+                liveDiagnostic.valid ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/70 shrink-0">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>Sintaxis correcta</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => jumpToError(liveDiagnostic)}
+                    title="Haz clic para situar el cursor en el fallo"
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border transition-colors shrink-0 ${
+                      liveDiagnostic.severity === 'error'
+                        ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/60'
+                        : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60'
+                    }`}
+                  >
+                    {liveDiagnostic.severity === 'error' ? (
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-3 h-3 shrink-0" />
+                    )}
+                    <span>
+                      Fallo en Línea {liveDiagnostic.line}, Col {liveDiagnostic.column}
+                    </span>
+                  </button>
+                )
               )}
             </div>
 
             {/* Run Action */}
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => setSqlCode('')}
+                onClick={() => {
+                  setSqlCode('');
+                  cursorPosRef.current = { start: 0, end: 0 };
+                  textareaRef.current?.focus();
+                }}
                 title="Limpiar editor"
                 className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded transition-colors"
               >
@@ -512,21 +764,115 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
             </div>
           </div>
 
-          {/* SQL Input Textarea (Monospace Editor) */}
-          <div className="h-44 bg-slate-900 border-b border-slate-800 relative flex shrink-0">
+          {/* SQL Input Textarea with Line Numbers Gutter (Monospace Editor) */}
+          <div className="h-44 bg-slate-900 border-b border-slate-800 relative flex shrink-0 overflow-hidden">
+            {/* Line Numbers Gutter */}
+            <div
+              ref={gutterRef}
+              aria-hidden="true"
+              className="w-10 bg-slate-950/80 border-r border-slate-800 py-3 px-1.5 font-mono text-xs leading-5 text-right text-slate-500 select-none overflow-hidden shrink-0"
+            >
+              {sqlCode.split('\n').map((_, idx) => {
+                const lineNum = idx + 1;
+                const isErrorLine = sqlCode.trim() !== '' && !liveDiagnostic.valid && liveDiagnostic.line === lineNum;
+                return (
+                  <div
+                    key={lineNum}
+                    className={`pr-1 rounded-l ${
+                      isErrorLine
+                        ? liveDiagnostic.severity === 'error'
+                          ? 'bg-rose-500/25 text-rose-400 font-bold'
+                          : 'bg-amber-500/25 text-amber-300 font-bold'
+                        : ''
+                    }`}
+                  >
+                    {lineNum}
+                  </div>
+                );
+              })}
+            </div>
+
             <textarea
               ref={textareaRef}
               value={sqlCode}
-              onChange={e => setSqlCode(e.target.value)}
+              onChange={e => {
+                setSqlCode(e.target.value);
+                updateCursorPosition();
+              }}
+              onScroll={() => {
+                if (gutterRef.current && textareaRef.current) {
+                  gutterRef.current.scrollTop = textareaRef.current.scrollTop;
+                }
+              }}
+              onClick={updateCursorPosition}
+              onKeyUp={updateCursorPosition}
+              onSelect={updateCursorPosition}
               onKeyDown={handleKeyDown}
-              placeholder="Escribe consultas SQL aquí (SELECT, INSERT, UPDATE, DELETE, JOIN, etc.)... Presiona Ctrl + Enter para ejecutar."
-              className="w-full h-full p-3 font-mono text-xs text-amber-200 bg-transparent resize-none outline-none leading-relaxed selection:bg-amber-500 selection:text-slate-950"
+              placeholder="Escribe consultas SQL aquí (SELECT, INSERT, UPDATE, DELETE, JOIN, etc.)... Doble clic en un campo para añadirlo • Ctrl + Enter para ejecutar."
+              className="w-full h-full px-3 py-3 font-mono text-xs leading-5 text-amber-200 bg-transparent resize-none outline-none selection:bg-amber-500 selection:text-slate-950"
               spellCheck={false}
             />
             <div className="absolute right-3 bottom-2 text-[10px] font-mono text-slate-500 pointer-events-none">
-              Presiona Ctrl + Enter para ejecutar
+              Doble clic en campo para insertar • Ctrl + Enter para ejecutar
             </div>
           </div>
+
+          {/* Live Syntax Error Location Diagnostic Strip */}
+          {sqlCode.trim() !== '' && !liveDiagnostic.valid && (() => {
+            const ptr = formatPointerLine(liveDiagnostic.lineText, liveDiagnostic.column, liveDiagnostic.length);
+            const isErr = liveDiagnostic.severity === 'error';
+            return (
+              <div
+                className={`px-4 py-2 border-b shrink-0 flex flex-col gap-1.5 text-xs ${
+                  isErr
+                    ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/60 text-rose-900 dark:text-rose-200'
+                    : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {isErr ? (
+                      <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                    )}
+                    <span className="font-bold">
+                      Línea {liveDiagnostic.line}, Columna {liveDiagnostic.column}:
+                    </span>
+                    <span className="font-medium truncate">{liveDiagnostic.message}</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => jumpToError(liveDiagnostic)}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold transition-colors shrink-0 ${
+                      isErr
+                        ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                        : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                    }`}
+                  >
+                    <Crosshair className="w-3 h-3" />
+                    <span>Ir al fallo</span>
+                  </button>
+                </div>
+
+                {ptr.displayLine && (
+                  <pre className="font-mono text-[11px] leading-tight bg-slate-950 text-slate-200 px-3 py-1.5 rounded border border-slate-800 overflow-x-auto select-text">
+                    <div>{ptr.displayLine}</div>
+                    <div className={isErr ? 'text-rose-400 font-bold' : 'text-amber-400 font-bold'}>
+                      {ptr.spaces}{ptr.carets}
+                    </div>
+                  </pre>
+                )}
+
+                {liveDiagnostic.hint && (
+                  <div className="text-[11px] opacity-90">
+                    {liveDiagnostic.hint}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Results Header Bar */}
           <div className="h-10 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between shrink-0 text-xs">
@@ -588,16 +934,45 @@ export const DatabaseSimulator: React.FC<DatabaseSimulatorProps> = ({
                 <p className="text-xs">Escribe una consulta SQL o haz clic en "SELECT" en cualquier tabla para ver los resultados.</p>
               </div>
             ) : !queryResult.success ? (
-              <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-rose-800 dark:text-rose-300 space-y-2">
-                <div className="flex items-center gap-2 font-bold text-xs">
-                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-                  <span>Error de Ejecución SQL</span>
+              <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-rose-800 dark:text-rose-300 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-bold text-xs">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>
+                      Error de Ejecución SQL
+                      {queryResult.diagnostic && ` (Línea ${queryResult.diagnostic.line}, Columna ${queryResult.diagnostic.column})`}
+                    </span>
+                  </div>
+                  {queryResult.diagnostic && (
+                    <button
+                      type="button"
+                      onClick={() => jumpToError(queryResult.diagnostic!)}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-600 hover:bg-rose-500 text-white transition-colors"
+                    >
+                      <Crosshair className="w-3 h-3" />
+                      <span>Ir al fallo</span>
+                    </button>
+                  )}
                 </div>
                 <pre className="font-mono text-xs whitespace-pre-wrap bg-white/60 dark:bg-black/40 p-2.5 rounded-lg border border-rose-200 dark:border-rose-900/40">
                   {queryResult.error}
+                  {queryResult.diagnostic?.hint ? `\n${queryResult.diagnostic.hint}` : ''}
                 </pre>
+                {queryResult.diagnostic && queryResult.diagnostic.lineText && (() => {
+                  const ptr = formatPointerLine(
+                    queryResult.diagnostic.lineText,
+                    queryResult.diagnostic.column,
+                    queryResult.diagnostic.length
+                  );
+                  return (
+                    <pre className="font-mono text-[11px] leading-tight bg-slate-950 text-slate-200 px-3 py-2 rounded-lg border border-slate-800 overflow-x-auto">
+                      <div>{ptr.displayLine}</div>
+                      <div className="text-rose-400 font-bold">{ptr.spaces}{ptr.carets}</div>
+                    </pre>
+                  );
+                })()}
                 <p className="text-[11px] text-rose-600 dark:text-rose-400">
-                  Verifica los nombres de las tablas y campos definidos en el explorador de la izquierda.
+                  Verifica la sintaxis SQL y los nombres de tablas y campos definidos en el explorador de la izquierda.
                 </p>
               </div>
             ) : !queryResult.isSelect ? (

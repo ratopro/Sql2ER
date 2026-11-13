@@ -1630,47 +1630,49 @@ export default function App() {
         />
       )}
 
-      {/* Floating Left Toolbar */}
-      <Toolbar
-        activeTool={isSpacePressed ? 'pan' : activeTool}
-        onSelectTool={handleSelectTool}
-        onOpenSqlImport={() => setIsSqlImportOpen(true)}
-        onOpenTemplates={handleOpenTemplates}
-        onOpenCreateDatabase={() => {
-          setIsFirstDbPrompt(false);
-          setIsCreateDbOpen(true);
-        }}
-        isTimelineOpen={isTimelineOpen}
-        onToggleTimeline={() => setIsTimelineOpen(!isTimelineOpen)}
-      />
+      {/* Floating Left Toolbar, Zoom Bar & Minimap (only in ERD canvas view) */}
+      {activeTab === 'erd' && (
+        <>
+          <Toolbar
+            activeTool={isSpacePressed ? 'pan' : activeTool}
+            onSelectTool={handleSelectTool}
+            onOpenSqlImport={() => setIsSqlImportOpen(true)}
+            onOpenTemplates={handleOpenTemplates}
+            onOpenCreateDatabase={() => {
+              setIsFirstDbPrompt(false);
+              setIsCreateDbOpen(true);
+            }}
+            isTimelineOpen={isTimelineOpen}
+            onToggleTimeline={() => setIsTimelineOpen(!isTimelineOpen)}
+          />
 
-      {/* Bottom Right Zoom & Minimap Bar */}
-      <ZoomBar
-        zoom={zoom}
-        onZoomIn={() => setZoom(prev => Math.min(prev * 1.15, 2.5))}
-        onZoomOut={() => setZoom(prev => Math.max(prev * 0.85, 0.2))}
-        onResetZoom={() => setZoom(1)}
-        onFitToScreen={handleFitToScreen}
-        showMinimap={showMinimap}
-        onToggleMinimap={() => setShowMinimap(!showMinimap)}
-        fontSizePercent={fontSizePercent}
-        onIncreaseFontSize={handleIncreaseFontSize}
-        onDecreaseFontSize={handleDecreaseFontSize}
-        onResetFontSize={handleResetFontSize}
-      />
+          <ZoomBar
+            zoom={zoom}
+            onZoomIn={() => setZoom(prev => Math.min(prev * 1.15, 2.5))}
+            onZoomOut={() => setZoom(prev => Math.max(prev * 0.85, 0.2))}
+            onResetZoom={() => setZoom(1)}
+            onFitToScreen={handleFitToScreen}
+            showMinimap={showMinimap}
+            onToggleMinimap={() => setShowMinimap(!showMinimap)}
+            fontSizePercent={fontSizePercent}
+            onIncreaseFontSize={handleIncreaseFontSize}
+            onDecreaseFontSize={handleDecreaseFontSize}
+            onResetFontSize={handleResetFontSize}
+          />
 
-      {/* Collapsible Minimap */}
-      {showMinimap && canvasRef.current && (
-        <Minimap
-          tables={tables}
-          stickies={stickies}
-          frames={frames}
-          pan={pan}
-          zoom={zoom}
-          canvasWidth={canvasRef.current.clientWidth}
-          canvasHeight={canvasRef.current.clientHeight}
-          onPanChange={setPan}
-        />
+          {showMinimap && canvasRef.current && (
+            <Minimap
+              tables={tables}
+              stickies={stickies}
+              frames={frames}
+              pan={pan}
+              zoom={zoom}
+              canvasWidth={canvasRef.current.clientWidth}
+              canvasHeight={canvasRef.current.clientHeight}
+              onPanChange={setPan}
+            />
+          )}
+        </>
       )}
 
       {/* Interactive Whiteboard Canvas */}
@@ -1925,22 +1927,24 @@ export default function App() {
         </div>
       </div>
 
-      {/* Database Evolution Timeline Bar */}
-      <TimelineBar
-        steps={steps}
-        activeStepIndex={activeStepIndex}
-        onSelectStep={handleSelectStep}
-        onOpenAddStep={() => {
-          setSelectedTableForStep(undefined);
-          setIsAddStepOpen(true);
-        }}
-        onOpenMigrationsSql={() => {
-          setExportInitialTab('timeline');
-          setIsExportOpen(true);
-        }}
-        isOpen={isTimelineOpen}
-        onToggleOpen={() => setIsTimelineOpen(!isTimelineOpen)}
-      />
+      {/* Database Evolution Timeline Bar (only in ERD canvas view) */}
+      {activeTab === 'erd' && (
+        <TimelineBar
+          steps={steps}
+          activeStepIndex={activeStepIndex}
+          onSelectStep={handleSelectStep}
+          onOpenAddStep={() => {
+            setSelectedTableForStep(undefined);
+            setIsAddStepOpen(true);
+          }}
+          onOpenMigrationsSql={() => {
+            setExportInitialTab('timeline');
+            setIsExportOpen(true);
+          }}
+          isOpen={isTimelineOpen}
+          onToggleOpen={() => setIsTimelineOpen(!isTimelineOpen)}
+        />
+      )}
 
       {/* Modal: New Evolution Step */}
       <AddStepModal
